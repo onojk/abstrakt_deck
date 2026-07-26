@@ -1,9 +1,21 @@
 name: abstrakt-deck
 title: Abstrakt Deck
 version: '0.1.8'
-summary: Interactive GPU-accelerated canvas and slide renderer
+summary: Audio-reactive kaleidoscope visualizer with MIDI input and video export
 description: |
-  abstrakt-deck is a high-performance visual tool built with Rust and wgpu.
+  Abstrakt Deck turns live audio into generative visuals in real time. Feed it
+  microphone, system audio, or MIDI and it renders reactive kaleidoscopes,
+  particle fields, and video-feedback effects on the GPU at full frame rate.
+
+  Built in Rust on wgpu — runs on Vulkan and stays fast on integrated graphics.
+
+  - Per-band audio detection with ADSR envelopes and tempo tracking
+  - MIDI input for live control
+  - Color theory system with simultaneous-contrast rendering
+  - Multi-panel grid layouts
+  - Record straight to MP4, up to 4K
+
+  Free and open source, MIT licensed.
 license: MIT
 contact: https://github.com/onojk/abstrakt_deck/issues
 issues: https://github.com/onojk/abstrakt_deck/issues
