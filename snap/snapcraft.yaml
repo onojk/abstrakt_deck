@@ -1,0 +1,42 @@
+name: abstrakt-deck
+title: Abstrakt Deck
+version: '0.1.8'
+summary: Interactive GPU-accelerated canvas and slide renderer
+description: |
+  abstrakt-deck is a high-performance visual tool built with Rust and wgpu.
+license: MIT
+contact: https://github.com/onojk/abstrakt_deck/issues
+issues: https://github.com/onojk/abstrakt_deck/issues
+source-code: https://github.com/onojk/abstrakt_deck
+website: https://github.com/onojk/abstrakt_deck
+
+base: core22
+grade: stable
+confinement: strict
+
+apps:
+  abstrakt-deck:
+    command: bin/abstrakt-deck
+    extensions: [gnome]
+    plugs:
+      - opengl
+      - wayland
+      - x11
+      - audio-playback
+
+parts:
+  abstrakt-deck:
+    plugin: rust
+    source: .
+    build-packages:
+      - pkg-config
+      - libasound2-dev
+      - libfontconfig1-dev
+      - libx11-dev
+      - libxcb1-dev
+      - libxcursor-dev
+      - libxrandr-dev
+      - libxi-dev
+      - libwayland-dev
+    stage-packages:
+      - libasound2
