@@ -2796,7 +2796,7 @@ impl MenuBar {
                 painter.rect_stroke(
                     strip_rect,
                     egui::Rounding::ZERO,
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 220, 80)),
+                    egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 220, 80)),
                 );
 
                 // Drag to reposition the strip
