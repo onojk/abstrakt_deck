@@ -2,8 +2,8 @@
 <!--
   MSIX manifest for the Microsoft Store (Store ID 9NR8XFDVFN48).
   Identity/Publisher values are assigned by Partner Center; do not change them.
-  ("AbstractDeck" with a c in the Identity Name is Microsoft's assigned ID.)
-  Expected Package Family Name: ONOJK123Art.AbstractDeck_mz8ydyxn3nck0
+  Identity Name is ONOJK123Art.AbstraktDeck (with a k, like the app name).
+  Expected Package Family Name: ONOJK123Art.AbstraktDeck_mz8ydyxn3nck0
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -12,7 +12,7 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="ONOJK123Art.AbstractDeck"
+    Name="ONOJK123Art.AbstraktDeck"
     Publisher="CN=F29DE742-E5CC-4535-991B-F77A540F906D"
     Version="0.1.9.0"
     ProcessorArchitecture="x64" />

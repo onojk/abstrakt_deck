@@ -2,7 +2,7 @@
 
 Builds `abstrakt-deck_<version>_x64.msix` for the Microsoft Store
 (Store ID 9NR8XFDVFN48, Package Family Name
-`ONOJK123Art.AbstractDeck_mz8ydyxn3nck0`).
+`ONOJK123Art.AbstraktDeck_mz8ydyxn3nck0`).
 
 Run everything from the repo root in a normal (non-admin) PowerShell unless
 noted. If PowerShell refuses to run scripts, prefix each command with
@@ -79,7 +79,7 @@ Edit `Version="0.1.9.0"` in `AppxManifest.xml` (the fourth number must stay
 3. `build-msix.ps1 -Sign`, then
    `Add-AppxPackage packaging\windows\out\abstrakt-deck_0.1.9.0_x64.testsigned.msix`
 4. Launch "Abstrakt Deck" from Start. Uninstall with
-   `Get-AppxPackage *AbstractDeck* | Remove-AppxPackage`.
+   `Get-AppxPackage *AbstraktDeck* | Remove-AppxPackage`.
 
 No `.pfx` is ever exported; signtool signs from the certificate store.
 `*.pfx` is gitignored anyway.
