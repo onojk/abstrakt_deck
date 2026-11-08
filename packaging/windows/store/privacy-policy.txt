@@ -1,0 +1,54 @@
+Abstrakt Deck - Privacy Policy (DRAFT)
+======================================
+Draft for https://onojk123.com/abstrakt-deck/privacy. Rewrite in your own
+voice; keep the facts. Not legal advice.
+
+Last updated: [DATE]
+
+Abstrakt Deck is an audio visualizer made by ONOJK123 Art
+(contact: onojk123@gmail.com).
+
+The short version: Abstrakt Deck does not collect, store, sell or send any
+personal data. Everything it does happens on your own computer.
+
+Audio
+- Depending on the source you pick in Audio > Source, Abstrakt Deck listens
+  to the sound your computer is playing (system audio, the default), to your
+  microphone, or to an audio file you open.
+- That audio is analysed in memory, in real time, to drive the visuals
+  (loudness, frequency bands, beats and tempo). It is not recorded, saved,
+  or sent anywhere. Analysis results are discarded as the visuals update.
+- Microphone access is used only while "Mic" is the selected source. You
+  can turn it off at any time in Windows Settings > Privacy & security >
+  Microphone.
+
+Files on your computer
+- Recordings you make with F12 are saved as video files (picture only, no
+  sound) in your Videos\abstrakt-deck folder.
+- Videos you export are saved where you choose. They contain the audio
+  file you selected for the export.
+- Presets and settings are saved in your user profile
+  (%APPDATA%\abstrakt-deck on Windows).
+- These files stay on your computer. You can delete them at any time;
+  uninstalling the app does not delete your recordings or exports.
+
+Network
+- Abstrakt Deck does not connect to the internet. It has no accounts,
+  analytics, advertising, crash reporting or telemetry.
+
+Third parties
+- Abstrakt Deck includes FFmpeg, which it runs locally to encode videos.
+  FFmpeg is given only local files and does not send data anywhere.
+- If you installed Abstrakt Deck from the Microsoft Store, Microsoft may
+  collect information about the purchase and installation under its own
+  privacy statement: https://privacy.microsoft.com/privacystatement
+
+Children
+- Abstrakt Deck does not collect data from anyone, including children.
+
+Changes
+- If this policy changes, the updated version will be posted at this
+  address with a new "Last updated" date.
+
+Contact
+- Questions: onojk123@gmail.com

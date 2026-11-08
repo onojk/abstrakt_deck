@@ -1,0 +1,136 @@
+ABSTRAKT DECK - MICROSOFT STORE LISTING (DRAFT)
+================================================
+Draft text for Partner Center > Store listings > English. Rewrite it in your
+own voice. Field limits are noted in [brackets]. Everything claimed below is
+something the 0.1.9 app actually does; if you remove a feature, remove its line.
+
+
+PRODUCT NAME
+------------
+Abstrakt Deck
+(Reserved name in Partner Center; must match DisplayName in the manifest.)
+
+
+SHORT DESCRIPTION   [up to 1,000 chars; shown at the top of the listing]
+-----------------
+An audio-reactive kaleidoscope for your desktop. Play anything - Spotify, a
+browser tab, a game - and Abstrakt Deck turns it into live, beat-synced
+visuals. No setup: it listens to your system audio out of the box.
+
+
+DESCRIPTION   [up to 10,000 chars]
+-----------
+Abstrakt Deck is a real-time visualizer that turns whatever your PC is
+playing into shifting kaleidoscopes, 3D forms and painterly patterns.
+
+It listens to system audio by default, so it reacts to music from any app
+with nothing to configure. Prefer a live source? Switch to your microphone.
+Want a finished video? Load an audio file and export a music video at up to
+4K.
+
+Under the hood it tracks tempo and beats across frequency bands, so the
+visuals don't just pulse with volume - they lock to the rhythm.
+
+Build your own look from shapes, painters and effects, save it as a preset,
+or hand control to Random, Reactive or Party mode and let the music decide.
+Drive it from a MIDI controller for live sets, go fullscreen with F11, and
+press F12 to record what you see.
+
+Everything runs locally on your PC. Abstrakt Deck does not collect, store
+or send any data.
+
+
+WHAT'S NEW IN THIS VERSION   [optional, up to 1,500 chars]
+--------------------------
+- First Windows release.
+- F12 recordings now play back at real speed on every display.
+
+
+PRODUCT FEATURES   [up to 20 items, 200 chars each]
+----------------
+- Reacts to anything playing on your PC (system audio), your microphone, or an audio file
+- Beat and tempo detection with phase lock, so visuals move with the rhythm
+- Nine 3D shapes, including Myocyte and PrimeHelix
+- Painters: hue stripes, spirals, plasma, or your own image as a skin
+- Effects: blackhole warp, Phantom Alpha, Bezold color contrast, micro swirl, depth shading, explosions
+- Color theory harmonies and palettes to keep every scene coherent
+- One-click Style Bundles, plus savable presets
+- Random, Reactive and Party modes for hands-free shows
+- MIDI controller support for live performance
+- Press F12 to record the screen to MP4
+- Export a music video from any audio file at 720p, 1080p or 4K, 30 or 60 fps
+- Fullscreen mode (F11) for projectors and second screens
+- Runs entirely offline; no account, no data collection
+
+
+SEARCH TERMS   [max 7 terms, 30 characters each, 21 words total]
+------------
+music visualizer
+audio visualizer
+kaleidoscope
+VJ
+beat sync visuals
+music video maker
+spectrum
+
+
+CATEGORY
+--------
+Suggested primary: Music
+Alternatives:      Multimedia design (creative tool angle),
+                   Entertainment (screensaver / party angle)
+Music is where people browse for visualizers; it's the best fit.
+
+
+SYSTEM REQUIREMENTS   [Properties page]
+-------------------
+Minimum:     Windows 10 version 1809 or later, 64-bit
+             Graphics card with DirectX 12 or Vulkan support
+             Speakers or headphones (for system-audio mode)
+Recommended: Dedicated GPU for 4K export
+Input:       Keyboard, mouse; MIDI controller optional
+
+
+AGE RATING   [IARC questionnaire]
+----------
+No violence, no user-generated content shared online, no chat, no purchases,
+no data collection. Expect the lowest rating (e.g. "3+" / "Everyone").
+
+
+PRIVACY POLICY URL
+------------------
+https://onojk123.com/abstrakt-deck/privacy   (host privacy-policy.txt there)
+Partner Center requires a privacy policy URL because the app declares the
+microphone capability.
+
+
+NOTES FOR CERTIFICATION   [Submission options > Notes for certification]
+-----------------------
+Abstrakt Deck is a Rust/wgpu desktop app packaged as a full-trust MSIX.
+
+- runFullTrust: required for the desktop (Win32) executable.
+- microphone: only used when the user selects Audio > Source > Mic. The
+  default source is Loopback, which captures system audio output via
+  WASAPI loopback and needs no permission prompt.
+- To test: play music in any app, then launch Abstrakt Deck - the visuals
+  react immediately. F11 toggles fullscreen, M hides the side panel,
+  F12 starts/stops a recording (saved to Videos\abstrakt-deck).
+- ffmpeg.exe (GPLv3) is bundled and run as a separate process only to
+  encode recordings/exports. License texts are in the Licenses folder of the
+  package; FFmpeg source: https://onojk123.com/abstrakt-deck/ffmpeg-7.1.1.tar.xz
+- No network access, no account, no data collection.
+- MIDI input is optional; with no MIDI device the app runs normally.
+
+
+SCREENSHOTS   [1366x768 or larger, PNG, up to 10]
+-----------
+packaging/windows/store/screenshots/ (1920x1080):
+  01-kaleidoscope.png  Cylinder shape, Plasma painter, hexagon frame
+  02-blackhole.png     Blackhole warp feedback
+  03-myocyte.png       Myocyte shape (splat)
+  04-primehelix.png    PrimeHelix shape
+Suggested captions (optional, up to 200 chars each):
+  01  Turn any song into a living kaleidoscope.
+  02  Blackhole warp bends the whole scene into a vortex.
+  03  Myocyte: a 3D cell field that moves with the music.
+  04  PrimeHelix: number-theory geometry, set to music.

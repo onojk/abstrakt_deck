@@ -105,4 +105,5 @@ such as `cmd.exe` that Rust's standard library and ffmpeg contain.
 | `Licenses\` | Shipped inside the package: app MIT license, ffmpeg GPL notice, Rust crate licenses. |
 | `gen-notices.ps1`, `about.toml`, `about.hbs` | Regenerate `Licenses\RUST-CRATE-LICENSES.txt` with cargo-about after `Cargo.lock` changes. |
 | `fetch-ffmpeg.ps1` | Downloads + verifies the pinned ffmpeg into `vendor\ffmpeg\` (gitignored). |
+| `store/` | Store listing draft, privacy-policy draft, and 1920x1080 screenshots for Partner Center. |
 | `fetch-ffmpeg-source.ps1` | Downloads + verifies the matching FFmpeg source tarball into `vendor\ffmpeg-src\` for hosting. |
