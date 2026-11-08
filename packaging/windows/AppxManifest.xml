@@ -14,7 +14,7 @@
   <Identity
     Name="ONOJK123Art.AbstractDeck"
     Publisher="CN=F29DE742-E5CC-4535-991B-F77A540F906D"
-    Version="0.1.8.0"
+    Version="0.1.9.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

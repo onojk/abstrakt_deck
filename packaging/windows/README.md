@@ -27,15 +27,15 @@ Output in `packaging\windows\out\` (gitignored):
 
 | File | Use |
 |---|---|
-| `abstrakt-deck_0.1.8.0_x64.msix` | **Upload this to Partner Center.** Unsigned; the Store signs it. |
-| `abstrakt-deck_0.1.8.0_x64.testsigned.msix` | Install on your own PC for testing. |
+| `abstrakt-deck_0.1.9.0_x64.msix` | **Upload this to Partner Center.** Unsigned; the Store signs it. |
+| `abstrakt-deck_0.1.9.0_x64.testsigned.msix` | Install on your own PC for testing. |
 
 The script fetches ffmpeg on first run (`fetch-ffmpeg.ps1`, pinned 7.1.1
 with a recorded SHA-256).
 
 ## Version bump
 
-Edit `Version="0.1.8.0"` in `AppxManifest.xml` (the fourth number must stay
+Edit `Version="0.1.9.0"` in `AppxManifest.xml` (the fourth number must stay
 0 for Store packages). Optionally also `version` in
 `abstrakt-deck.exe.manifest`.
 
@@ -50,7 +50,7 @@ Edit `Version="0.1.8.0"` in `AppxManifest.xml` (the fourth number must stay
 2. Trust it, **in an administrator PowerShell**, once per PC:
    `Import-Certificate -FilePath C:\dev\abstrakt_deck\packaging\windows\out\AbstraktDeck-test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`
 3. `build-msix.ps1 -Sign`, then
-   `Add-AppxPackage packaging\windows\out\abstrakt-deck_0.1.8.0_x64.testsigned.msix`
+   `Add-AppxPackage packaging\windows\out\abstrakt-deck_0.1.9.0_x64.testsigned.msix`
 4. Launch "Abstrakt Deck" from Start. Uninstall with
    `Get-AppxPackage *AbstractDeck* | Remove-AppxPackage`.
 
@@ -61,7 +61,7 @@ No `.pfx` is ever exported; signtool signs from the certificate store.
 
 ```powershell
 & "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" reset
-& "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" test -appxpackagepath "C:\dev\abstrakt_deck\packaging\windows\out\abstrakt-deck_0.1.8.0_x64.testsigned.msix" -reportoutputpath "C:\dev\abstrakt_deck\packaging\windows\out\wack-report.xml"
+& "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" test -appxpackagepath "C:\dev\abstrakt_deck\packaging\windows\out\abstrakt-deck_0.1.9.0_x64.testsigned.msix" -reportoutputpath "C:\dev\abstrakt_deck\packaging\windows\out\wack-report.xml"
 ```
 
 Known result: **"Blocked executables" (optional) fails** and can be ignored

@@ -1,3 +1,17 @@
+abstrakt-deck (0.1.9-1) UNRELEASED; urgency=medium
+
+  * New upstream release 0.1.9.
+  * Fix F12 live recordings playing back in slow motion: frames are now
+    paced to wall-clock time at 30 fps regardless of display refresh rate.
+  * MIDI devices are opened on a background thread so a slow MIDI backend
+    no longer delays the first frame.
+  * If Mic or Loopback capture cannot be opened, the audio source now falls
+    back to Silent with a note in the Audio panel.
+  * Windows port (WASAPI loopback, MSIX packaging); Linux code paths are
+    otherwise unchanged.
+
+ -- onojk <onojk123@gmail.com>  Sun, 08 Nov 2026 06:44:43 -0800
+
 abstrakt-deck (0.1.8-3) noble; urgency=medium
 
   * Override dh_auto_install to install the built binary directly. dh-cargo's

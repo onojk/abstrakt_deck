@@ -465,7 +465,7 @@ impl MenuBar {
                     });
 
                     ui.menu_button("Help", |ui| {
-                        ui.label("abstrakt-deck v0.1.0");
+                        ui.label(concat!("abstrakt-deck v", env!("CARGO_PKG_VERSION")));
                         ui.separator();
                         if ui.button("Show Cheat Sheet  ?").clicked() {
                             frame_actions.push(MenuAction::ToggleCheatSheet);
