@@ -620,7 +620,48 @@ impl AudioCapture {
     /// default input with a warning. If false, use default input directly (microphone).
     pub fn start(prefer_monitor: bool) -> Result<Self, String> {
         let host = cpal::default_host();
+        let (device, config) = Self::select_device(&host, prefer_monitor)?;
+        Self::start_on(device, config, prefer_monitor)
+    }
 
+    /// Windows: "monitor" means WASAPI loopback. cpal opens an input stream on
+    /// a *render* (output) endpoint with AUDCLNT_STREAMFLAGS_LOOPBACK, so we
+    /// capture whatever the default speakers/headphones are playing. Falls
+    /// back to the default microphone if there is no output device.
+    #[cfg(target_os = "windows")]
+    fn select_device(
+        host: &cpal::Host,
+        prefer_monitor: bool,
+    ) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
+        if prefer_monitor {
+            match host.default_output_device() {
+                Some(out) => {
+                    let config = out
+                        .default_output_config()
+                        .map_err(|e| format!("Failed to get default output config: {}", e))?;
+                    log::info!("WASAPI loopback on default output device");
+                    return Ok((out, config));
+                }
+                None => log::warn!(
+                    "No output device for WASAPI loopback — falling back to default input device"
+                ),
+            }
+        }
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| "No audio input device found".to_string())?;
+        let config = device
+            .default_input_config()
+            .map_err(|e| format!("Failed to get default input config: {}", e))?;
+        Ok((device, config))
+    }
+
+    /// Linux / other: look for a PulseAudio/PipeWire "monitor" source.
+    #[cfg(not(target_os = "windows"))]
+    fn select_device(
+        host: &cpal::Host,
+        prefer_monitor: bool,
+    ) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
         let device = if prefer_monitor {
             let monitor = host
                 .input_devices()
@@ -642,13 +683,19 @@ impl AudioCapture {
             host.default_input_device()
                 .ok_or_else(|| "No audio input device found".to_string())?
         };
-
-        let device_name = device.name().unwrap_or_else(|_| "<unknown>".to_string());
-        log::info!("Audio device: {}", device_name);
-
         let config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get default input config: {}", e))?;
+        Ok((device, config))
+    }
+
+    fn start_on(
+        device: cpal::Device,
+        config: cpal::SupportedStreamConfig,
+        prefer_monitor: bool,
+    ) -> Result<Self, String> {
+        let device_name = device.name().unwrap_or_else(|_| "<unknown>".to_string());
+        log::info!("Audio device: {}", device_name);
 
         let sample_rate = config.sample_rate().0;
         let channels = config.channels() as usize;
