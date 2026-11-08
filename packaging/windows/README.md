@@ -16,6 +16,33 @@ noted. If PowerShell refuses to run scripts, prefix each command with
 - `cargo vendor --locked vendor` — the repo's `.cargo/config.toml` builds
   from vendored crates (needed for the Debian build), so `vendor\` must exist.
 
+## Host the FFmpeg source (once per ffmpeg version, before submitting)
+
+The package ships a GPLv3 ffmpeg.exe, and `Licenses\THIRD-PARTY-NOTICES.txt`
+tells users they can get its source at
+`https://onojk123.com/abstrakt-deck/ffmpeg-7.1.1.tar.xz`. Make that URL live:
+
+1. ```powershell
+   packaging\windows\fetch-ffmpeg-source.ps1
+   ```
+   Downloads the official `ffmpeg-7.1.1.tar.xz` (the n7.1.1 tag, commit
+   db69d06eee, which is what gyan.dev's build was made from) plus its `.asc`
+   signature into `packaging\windows\vendor\ffmpeg-src\` and checks the
+   SHA-256 recorded in the script.
+2. Optional signature check (Git Bash has `gpg`):
+   ```bash
+   curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0xFCF986EA15E6E293A5644F10B4322F04D67658D8" | gpg --import
+   gpg --verify packaging/windows/vendor/ffmpeg-src/ffmpeg-7.1.1.tar.xz.asc packaging/windows/vendor/ffmpeg-src/ffmpeg-7.1.1.tar.xz
+   ```
+   Expect `Good signature from "FFmpeg release signing key"` and primary key
+   fingerprint `FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8`.
+3. Upload `ffmpeg-7.1.1.tar.xz` (and the `.asc`) to
+   `onojk123.com/abstrakt-deck/`, then check the URL downloads.
+
+If you change the ffmpeg version in `fetch-ffmpeg.ps1`, update
+`fetch-ffmpeg-source.ps1` and the URL in `Licenses\THIRD-PARTY-NOTICES.txt`
+to match.
+
 ## Build
 
 ```powershell
@@ -78,3 +105,4 @@ such as `cmd.exe` that Rust's standard library and ffmpeg contain.
 | `Licenses\` | Shipped inside the package: app MIT license, ffmpeg GPL notice, Rust crate licenses. |
 | `gen-notices.ps1`, `about.toml`, `about.hbs` | Regenerate `Licenses\RUST-CRATE-LICENSES.txt` with cargo-about after `Cargo.lock` changes. |
 | `fetch-ffmpeg.ps1` | Downloads + verifies the pinned ffmpeg into `vendor\ffmpeg\` (gitignored). |
+| `fetch-ffmpeg-source.ps1` | Downloads + verifies the matching FFmpeg source tarball into `vendor\ffmpeg-src\` for hosting. |

@@ -19,9 +19,12 @@ It is not linked into Abstrakt Deck.
             Binary: https://github.com/GyanD/codexffmpeg/releases/tag/7.1.1
             Build configuration and library list: ffmpeg-build-README.txt
 
-  Source code for this exact FFmpeg version:
-            https://github.com/FFmpeg/FFmpeg/commit/db69d06eee
+  Source code for this exact FFmpeg version (release tag n7.1.1,
+  commit db69d06eee):
+            https://onojk123.com/abstrakt-deck/ffmpeg-7.1.1.tar.xz
+  Also available upstream:
             https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+            https://github.com/FFmpeg/FFmpeg/commit/db69d06eee
 
   This static build also contains the following libraries, each under its
   own (GPL-compatible) license, with source available from their upstream
