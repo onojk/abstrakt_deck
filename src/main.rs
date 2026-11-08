@@ -2656,7 +2656,9 @@ impl GpuState {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            // WGPU_BACKEND=dx12|vulkan|metal|gl overrides (useful for diagnosing
+            // driver issues); default is all primary backends.
+            backends: wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY),
             ..Default::default()
         });
         let surface = instance

@@ -10,11 +10,36 @@ pub enum MidiEvent {
 
 pub struct MidiCapture {
     pub event_rx: Receiver<MidiEvent>,
-    _connection: MidiInputConnection<()>,
 }
 
 impl MidiCapture {
+    /// Returns immediately; port enumeration and connection happen on a
+    /// background thread. On Windows, WinMM initialisation can block for
+    /// several seconds (observed ~11 s on a VM with no MIDI hardware), which
+    /// previously froze the window before its first frame. The thread owns
+    /// the connection and parks for the life of the process.
     pub fn start() -> Result<Self, String> {
+        let (event_tx, event_rx) = bounded::<MidiEvent>(256);
+        std::thread::Builder::new()
+            .name("midi-init".into())
+            .spawn(move || match connect(event_tx) {
+                Ok(_connection) => loop {
+                    std::thread::park();
+                },
+                Err(e) => log::warn!(
+                    "MIDI capture failed: {} — visualizer will run without MIDI control",
+                    e
+                ),
+            })
+            .map_err(|e| format!("Failed to spawn MIDI thread: {}", e))?;
+        Ok(Self { event_rx })
+    }
+}
+
+fn connect(
+    event_tx: crossbeam_channel::Sender<MidiEvent>,
+) -> Result<MidiInputConnection<()>, String> {
+    {
         let mut midi_in = MidiInput::new("abstrakt-deck")
             .map_err(|e| format!("Failed to create MIDI input: {}", e))?;
         midi_in.ignore(Ignore::None);
@@ -61,8 +86,6 @@ impl MidiCapture {
             .unwrap_or_else(|_| "<unknown>".to_string());
         log::info!("MIDI port selected: {}", port_name);
 
-        let (event_tx, event_rx) = bounded::<MidiEvent>(256);
-
         let connection = midi_in
             .connect(
                 port,
@@ -95,9 +118,6 @@ impl MidiCapture {
             .map_err(|e| format!("Failed to connect to MIDI port: {}", e))?;
 
         log::info!("MIDI capture started");
-        Ok(Self {
-            event_rx,
-            _connection: connection,
-        })
+        Ok(connection)
     }
 }

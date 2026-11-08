@@ -120,12 +120,13 @@ impl TextAtlas {
         // Debug: save atlas to disk so the SDF can be eyeballed before testing on-device.
         // Reads the CPU-side buffer; no GPU readback needed.
         {
-            let debug_path = "/tmp/abstrakt_text_atlas_debug.png";
+            // temp_dir() is /tmp on Linux and %TEMP% on Windows.
+            let debug_path = std::env::temp_dir().join("abstrakt_text_atlas_debug.png");
             if let Some(img) = image::GrayImage::from_raw(atlas_w, atlas_h, atlas_bytes.clone()) {
-                if let Err(e) = img.save(debug_path) {
+                if let Err(e) = img.save(&debug_path) {
                     log::warn!("TextAtlas: could not save debug PNG: {}", e);
                 } else {
-                    log::info!("TextAtlas: SDF debug atlas saved to {}", debug_path);
+                    log::info!("TextAtlas: SDF debug atlas saved to {}", debug_path.display());
                 }
             }
         }
