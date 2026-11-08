@@ -1,0 +1,33 @@
+# cargo-about config for packaging/windows/gen-notices.ps1.
+# Order matters: for "A OR B" crates cargo-about picks the first accepted
+# license in this list, so permissive licenses come first.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Zlib",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "LicenseRef-UFL-1.0",
+]
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# egui's bundled fonts. cargo-about cannot attach a file to the non-SPDX
+# LicenseRef-UFL-1.0, so gen-notices.ps1 inserts the crate's fonts/UFL.txt
+# into that section after generation.
+[epaint_default_fonts.clarify]
+license = "(MIT OR Apache-2.0) AND OFL-1.1 AND LicenseRef-UFL-1.0"
+
+[[epaint_default_fonts.clarify.files]]
+path = "fonts/OFL.txt"
+license = "OFL-1.1"
+checksum = "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"

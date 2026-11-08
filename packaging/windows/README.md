@@ -1,0 +1,80 @@
+# Windows / Microsoft Store packaging
+
+Builds `abstrakt-deck_<version>_x64.msix` for the Microsoft Store
+(Store ID 9NR8XFDVFN48, Package Family Name
+`ONOJK123Art.AbstractDeck_mz8ydyxn3nck0`).
+
+Run everything from the repo root in a normal (non-admin) PowerShell unless
+noted. If PowerShell refuses to run scripts, prefix each command with
+`powershell -ExecutionPolicy Bypass -File`.
+
+## One-time setup
+
+- Rust stable (`x86_64-pc-windows-msvc`), Visual Studio Build Tools (C++),
+  Windows SDK 10.0.26100 (provides `makeappx`, `makepri`, `signtool`,
+  `appcert`).
+- `cargo vendor --locked vendor` — the repo's `.cargo/config.toml` builds
+  from vendored crates (needed for the Debian build), so `vendor\` must exist.
+
+## Build
+
+```powershell
+packaging\windows\build-msix.ps1            # unsigned .msix for Store upload
+packaging\windows\build-msix.ps1 -Sign      # + .testsigned.msix for local install
+```
+
+Output in `packaging\windows\out\` (gitignored):
+
+| File | Use |
+|---|---|
+| `abstrakt-deck_0.1.8.0_x64.msix` | **Upload this to Partner Center.** Unsigned; the Store signs it. |
+| `abstrakt-deck_0.1.8.0_x64.testsigned.msix` | Install on your own PC for testing. |
+
+The script fetches ffmpeg on first run (`fetch-ffmpeg.ps1`, pinned 7.1.1
+with a recorded SHA-256).
+
+## Version bump
+
+Edit `Version="0.1.8.0"` in `AppxManifest.xml` (the fourth number must stay
+0 for Store packages). Optionally also `version` in
+`abstrakt-deck.exe.manifest`.
+
+## Local test install
+
+1. Create the test certificate once (no admin):
+   ```powershell
+   New-SelfSignedCertificate -Type Custom -Subject "CN=F29DE742-E5CC-4535-991B-F77A540F906D" -KeyUsage DigitalSignature -FriendlyName "AbstraktDeck test" -CertStoreLocation Cert:\CurrentUser\My -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3","2.5.29.19={text}")
+   ```
+   Then export its public half:
+   `Get-ChildItem Cert:\CurrentUser\My | ? Subject -eq "CN=F29DE742-E5CC-4535-991B-F77A540F906D" | Export-Certificate -FilePath packaging\windows\out\AbstraktDeck-test.cer`
+2. Trust it, **in an administrator PowerShell**, once per PC:
+   `Import-Certificate -FilePath C:\dev\abstrakt_deck\packaging\windows\out\AbstraktDeck-test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`
+3. `build-msix.ps1 -Sign`, then
+   `Add-AppxPackage packaging\windows\out\abstrakt-deck_0.1.8.0_x64.testsigned.msix`
+4. Launch "Abstrakt Deck" from Start. Uninstall with
+   `Get-AppxPackage *AbstractDeck* | Remove-AppxPackage`.
+
+No `.pfx` is ever exported; signtool signs from the certificate store.
+`*.pfx` is gitignored anyway.
+
+## Windows App Certification Kit (administrator PowerShell)
+
+```powershell
+& "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" reset
+& "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" test -appxpackagepath "C:\dev\abstrakt_deck\packaging\windows\out\abstrakt-deck_0.1.8.0_x64.testsigned.msix" -reportoutputpath "C:\dev\abstrakt_deck\packaging\windows\out\wack-report.xml"
+```
+
+Known result: **"Blocked executables" (optional) fails** and can be ignored
+for Store submission. It only applies to Windows S mode and flags strings
+such as `cmd.exe` that Rust's standard library and ffmpeg contain.
+
+## Other files
+
+| File | Purpose |
+|---|---|
+| `AppxManifest.xml` | Package identity (from Partner Center — don't change), visuals, capabilities. |
+| `abstrakt-deck.exe.manifest` | Embedded in the exe by `build.rs`: PerMonitorV2 DPI awareness, Windows 10+. |
+| `make-assets.ps1` → `Assets\` | Logo PNGs generated from `flatpak\io.github.onojk.abstrakt_deck.png`. |
+| `Licenses\` | Shipped inside the package: app MIT license, ffmpeg GPL notice, Rust crate licenses. |
+| `gen-notices.ps1`, `about.toml`, `about.hbs` | Regenerate `Licenses\RUST-CRATE-LICENSES.txt` with cargo-about after `Cargo.lock` changes. |
+| `fetch-ffmpeg.ps1` | Downloads + verifies the pinned ffmpeg into `vendor\ffmpeg\` (gitignored). |

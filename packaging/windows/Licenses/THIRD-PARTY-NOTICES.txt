@@ -1,0 +1,35 @@
+Abstrakt Deck - third-party notices
+===================================
+
+Abstrakt Deck itself is released under the MIT License
+(see abstrakt-deck-LICENSE.txt). Source: https://github.com/onojk/abstrakt_deck
+
+
+FFmpeg (ffmpeg.exe)
+-------------------
+This package includes ffmpeg.exe, a separate program that Abstrakt Deck runs
+as an external process to encode F12 screen recordings and video exports.
+It is not linked into Abstrakt Deck.
+
+  Version:  7.1.1, "essentials" static win64 build by gyan.dev
+            (7.1.1-essentials_build-www.gyan.dev)
+  License:  GNU General Public License, version 3 or later
+            Full text: ffmpeg-LICENSE.txt (in this folder)
+  Build:    https://www.gyan.dev/ffmpeg/builds/
+            Binary: https://github.com/GyanD/codexffmpeg/releases/tag/7.1.1
+            Build configuration and library list: ffmpeg-build-README.txt
+
+  Source code for this exact FFmpeg version:
+            https://github.com/FFmpeg/FFmpeg/commit/db69d06eee
+            https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+
+  This static build also contains the following libraries, each under its
+  own (GPL-compatible) license, with source available from their upstream
+  projects: avisynth, bzlib, gmp, gnutls, iconv, libaom, libass,
+  libfontconfig, libfreetype, libfribidi, libgme, libgsm, libharfbuzz,
+  libmp3lame, libopencore-amrnb, libopencore-amrwb, libopenjpeg, libopenmpt,
+  libopus, librubberband, libspeex, libsrt, libssh, libtheora, libvidstab,
+  libvmaf, libvo-amrwbenc, libvorbis, libvpx, libwebp, libx264, libx265,
+  libxml2, libxvid, libzimg, libzmq, lzma, sdl2, zlib.
+
+  FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.

@@ -1,3 +1,8 @@
+// Windows release builds are GUI-subsystem apps: no console window opens
+// beside the visualizer. Debug builds keep the console for log output; in
+// release, stderr can still be captured by redirecting it.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 mod audio;
 mod bezold;
 mod micro_swirl;
@@ -8847,13 +8852,32 @@ impl ApplicationHandler for App {
         // App id matching the Flatpak / .desktop file, so the window
         // associates with our .desktop entry and icon (Wayland app_id, X11
         // WM_CLASS). Keep in sync with the .desktop StartupWMClass.
-        const APP_ID: &str = "io.github.onojk.abstrakt_deck";
         #[allow(unused_mut)]
         let mut attrs = Window::default_attributes()
             .with_title("abstrakt-deck")
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+        // Windows: title-bar / Alt+Tab icon (the exe has no icon resource;
+        // the MSIX supplies Start/taskbar logos separately).
+        #[cfg(target_os = "windows")]
+        {
+            let png = include_bytes!("../flatpak/io.github.onojk.abstrakt_deck.png");
+            match image::load_from_memory(png) {
+                Ok(img) => {
+                    let rgba = img
+                        .resize(256, 256, image::imageops::FilterType::Lanczos3)
+                        .into_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    match winit::window::Icon::from_rgba(rgba.into_raw(), w, h) {
+                        Ok(icon) => attrs = attrs.with_window_icon(Some(icon)),
+                        Err(e) => log::warn!("window icon: {}", e),
+                    }
+                }
+                Err(e) => log::warn!("window icon decode: {}", e),
+            }
+        }
         #[cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "ios"))))]
         {
+            const APP_ID: &str = "io.github.onojk.abstrakt_deck";
             use winit::platform::wayland::WindowAttributesExtWayland;
             use winit::platform::x11::WindowAttributesExtX11;
             // general name -> Wayland app_id / X11 WM_CLASS res_class.

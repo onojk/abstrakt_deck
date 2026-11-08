@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Jonathan Kendall"]
+license = "MIT"
 description = "Native Linux desktop audio-reactive kaleidoscope visualizer"
 
 [dependencies]
