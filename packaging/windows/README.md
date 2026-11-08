@@ -106,4 +106,5 @@ such as `cmd.exe` that Rust's standard library and ffmpeg contain.
 | `gen-notices.ps1`, `about.toml`, `about.hbs` | Regenerate `Licenses\RUST-CRATE-LICENSES.txt` with cargo-about after `Cargo.lock` changes. |
 | `fetch-ffmpeg.ps1` | Downloads + verifies the pinned ffmpeg into `vendor\ffmpeg\` (gitignored). |
 | `store/` | Store listing draft, privacy-policy draft, and 1920x1080 screenshots for Partner Center. |
+| `make-store-logos.ps1` → `store\logos\` | Store listing art: 2160x2160 box art, 1440x2160 poster, 300x300 tile (icon redrawn as vector). |
 | `fetch-ffmpeg-source.ps1` | Downloads + verifies the matching FFmpeg source tarball into `vendor\ffmpeg-src\` for hosting. |
