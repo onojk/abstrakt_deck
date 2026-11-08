@@ -489,6 +489,12 @@ pub enum AudioSourceMode {
 }
 
 impl AudioSourceMode {
+    /// Startup source. Windows defaults to WASAPI loopback (reacts to whatever
+    /// is playing, no permission prompt); Linux keeps File.
+    pub fn platform_default() -> Self {
+        if cfg!(target_os = "windows") { AudioSourceMode::Loopback } else { AudioSourceMode::File }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             AudioSourceMode::File     => "File",
@@ -685,7 +691,7 @@ impl Default for VisualParams {
             echo_mode_enabled:  false,
             echo_delay_white_s: 2.0,
             echo_delay_color_s: 4.0,
-            audio_source_mode: AudioSourceMode::File,
+            audio_source_mode: AudioSourceMode::platform_default(),
             palette_mode:     PaletteMode::Off,
             palette_tint:     1.0,
             palette_mono_hue: 200.0,
@@ -1847,17 +1853,23 @@ fn save_preset(gpu: &GpuState) -> Result<(), String> {
     Ok(())
 }
 
-fn start_audio_for_mode(mode: AudioSourceMode) -> Option<audio::AudioCapture> {
-    match mode {
-        AudioSourceMode::Mic => match audio::AudioCapture::start(false) {
-            Ok(a)  => { log::info!("Mic capture started"); Some(a) }
-            Err(e) => { log::warn!("Mic capture failed: {} — audio source will be silent", e); None }
-        },
-        AudioSourceMode::Loopback => match audio::AudioCapture::start(true) {
-            Ok(a)  => { log::info!("Loopback capture started"); Some(a) }
-            Err(e) => { log::warn!("Loopback capture failed: {} — audio source will be silent", e); None }
-        },
-        AudioSourceMode::File | AudioSourceMode::Silent => None,
+/// Ok(None) for modes that need no capture stream; Err(msg) if a capture
+/// stream could not be opened (caller falls back to Silent).
+fn start_audio_for_mode(mode: AudioSourceMode) -> Result<Option<audio::AudioCapture>, String> {
+    let prefer_monitor = match mode {
+        AudioSourceMode::Mic => false,
+        AudioSourceMode::Loopback => true,
+        AudioSourceMode::File | AudioSourceMode::Silent => return Ok(None),
+    };
+    match audio::AudioCapture::start(prefer_monitor) {
+        Ok(a) => {
+            log::info!("{} capture started", mode.as_str());
+            Ok(Some(a))
+        }
+        Err(e) => {
+            log::warn!("{} capture failed: {} — falling back to Silent", mode.as_str(), e);
+            Err(e)
+        }
     }
 }
 
@@ -8904,8 +8916,23 @@ impl ApplicationHandler for App {
                 .map(|g| g.params.audio_source_mode)
                 .unwrap_or_default();
             if current_mode != self.prev_audio_source_mode {
-                self.audio = start_audio_for_mode(current_mode);
-                self.prev_audio_source_mode = current_mode;
+                let (audio, mode, note) = match start_audio_for_mode(current_mode) {
+                    Ok(a) => (a, current_mode, String::new()),
+                    Err(_) => (
+                        None,
+                        AudioSourceMode::Silent,
+                        format!("{} unavailable (no audio device) — using Silent",
+                            current_mode.as_str()),
+                    ),
+                };
+                self.audio = audio;
+                self.prev_audio_source_mode = mode;
+                if let Some(g) = self.gpu.as_mut() {
+                    g.params.audio_source_mode = mode;
+                }
+                if let Some(m) = self.menu_bar.as_mut() {
+                    m.audio_status = note;
+                }
             }
         }
 

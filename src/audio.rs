@@ -626,26 +626,23 @@ impl AudioCapture {
 
     /// Windows: "monitor" means WASAPI loopback. cpal opens an input stream on
     /// a *render* (output) endpoint with AUDCLNT_STREAMFLAGS_LOOPBACK, so we
-    /// capture whatever the default speakers/headphones are playing. Falls
-    /// back to the default microphone if there is no output device.
+    /// capture whatever the default speakers/headphones are playing. Errors
+    /// (caller falls back to Silent) if there is no output device — it does
+    /// not silently switch to the microphone.
     #[cfg(target_os = "windows")]
     fn select_device(
         host: &cpal::Host,
         prefer_monitor: bool,
     ) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
         if prefer_monitor {
-            match host.default_output_device() {
-                Some(out) => {
-                    let config = out
-                        .default_output_config()
-                        .map_err(|e| format!("Failed to get default output config: {}", e))?;
-                    log::info!("WASAPI loopback on default output device");
-                    return Ok((out, config));
-                }
-                None => log::warn!(
-                    "No output device for WASAPI loopback — falling back to default input device"
-                ),
-            }
+            let out = host
+                .default_output_device()
+                .ok_or_else(|| "No output device for WASAPI loopback".to_string())?;
+            let config = out
+                .default_output_config()
+                .map_err(|e| format!("Failed to get default output config: {}", e))?;
+            log::info!("WASAPI loopback on default output device");
+            return Ok((out, config));
         }
         let device = host
             .default_input_device()

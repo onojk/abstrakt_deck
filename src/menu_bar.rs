@@ -258,6 +258,9 @@ pub struct MenuBar {
     pub lyric_input_buffer: String,
     /// Short status line under the Lyrics box ("Applied: N lines", load errors, …).
     pub lyric_status: String,
+    /// Short note under the audio Source selector (e.g. why Loopback fell
+    /// back to Silent). Empty = nothing shown.
+    pub audio_status: String,
 }
 
 impl MenuBar {
@@ -294,6 +297,7 @@ impl MenuBar {
             lyric_input_buffer: std::env::var("ABSTRAKT_LYRIC_TEXT")
                 .unwrap_or_else(|_| crate::text::corpus::DEFAULT_CORPUS.to_string()),
             lyric_status: String::new(),
+            audio_status: String::new(),
         }
     }
 
@@ -398,6 +402,7 @@ impl MenuBar {
         let mut lyric_buf    = std::mem::take(&mut self.lyric_input_buffer);
         let mut lyric_status = std::mem::take(&mut self.lyric_status);
         let player_info_snap = self.player_info.clone();
+        let audio_status_snap = self.audio_status.clone();
         let export_progress_snap = self.export_progress;
         let mut frame_actions: Vec<MenuAction> = Vec::new();
         let mut frame_changes: Vec<ParamChange> = Vec::new();
@@ -500,7 +505,8 @@ impl MenuBar {
                             Self::distortion_plus_section(ui, current_params, &mut frame_changes);
                             ui.separator();
                             Self::audio_section(ui, current_params, &mut frame_changes,
-                                shader_bpm, shader_beat_phase, shader_bpm_confidence);
+                                shader_bpm, shader_beat_phase, shader_bpm_confidence,
+                                &audio_status_snap);
                             ui.separator();
                             Self::lyrics_section(ui, &mut lyric_buf, &mut lyric_status,
                                 &mut frame_actions);
@@ -1112,6 +1118,7 @@ impl MenuBar {
         shader_bpm: Option<f32>,
         shader_beat_phase: f32,
         shader_bpm_confidence: f32,
+        audio_status: &str,
     ) {
         ui.collapsing("Audio", |ui| {
             // Source mode selector
@@ -1129,6 +1136,9 @@ impl MenuBar {
                     }
                 }
             });
+            if !audio_status.is_empty() {
+                ui.label(egui::RichText::new(audio_status).small().weak());
+            }
 
             // MIDI Shake
             ui.horizontal(|ui| {
