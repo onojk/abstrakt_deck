@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::time::Instant;
 
 pub struct Recorder {
@@ -13,7 +13,22 @@ pub struct Recorder {
     pub output_path: PathBuf,
 }
 
+/// Output frame rate of live (F12) recordings.
+const RECORD_FPS: u32 = 30;
+
 impl Recorder {
+    /// Number of frames that should have been written by now so the video
+    /// tracks wall-clock time (frame 0 is due at t=0).
+    fn frames_due(&self) -> u64 {
+        (self.start_time.elapsed().as_secs_f64() * RECORD_FPS as f64) as u64 + 1
+    }
+
+    /// False when we're ahead of wall-clock time; the caller can then skip
+    /// the GPU readback for this frame entirely.
+    pub fn wants_frame(&self) -> bool {
+        self.frame_count < self.frames_due()
+    }
+
     pub fn start(width: u32, height: u32) -> Result<Self, String> {
         let output_dir = dirs::video_dir()
             .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
@@ -27,13 +42,13 @@ impl Recorder {
 
         log::info!("Starting recording to {}", output_path.display());
 
-        let mut ffmpeg = Command::new("ffmpeg")
+        let mut ffmpeg = crate::ffmpeg::command()
             .args([
                 "-y",
                 "-f", "rawvideo",
                 "-pixel_format", "rgba",
                 "-video_size", &format!("{}x{}", width, height),
-                "-framerate", "30",
+                "-framerate", &RECORD_FPS.to_string(),
                 "-i", "-",
                 "-c:v", "libx264",
                 "-preset", "medium",
@@ -46,7 +61,7 @@ impl Recorder {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!(
-                "Failed to spawn ffmpeg: {} (is ffmpeg installed? `sudo apt install ffmpeg`)", e
+                "Failed to spawn ffmpeg: {} ({})", e, crate::ffmpeg::install_hint()
             ))?;
 
         let ffmpeg_stdin = ffmpeg.stdin.take()
@@ -63,10 +78,19 @@ impl Recorder {
         })
     }
 
+    /// Writes `data` once, or several times if rendering has fallen behind
+    /// RECORD_FPS, so the output duration matches real time regardless of
+    /// the display's refresh rate.
     pub fn submit_frame(&mut self, data: &[u8]) -> Result<(), String> {
-        self.ffmpeg_stdin.write_all(data)
-            .map_err(|e| format!("Failed to write frame: {}", e))?;
-        self.frame_count += 1;
+        let due = self.frames_due();
+        loop {
+            self.ffmpeg_stdin.write_all(data)
+                .map_err(|e| format!("Failed to write frame: {}", e))?;
+            self.frame_count += 1;
+            if self.frame_count >= due {
+                break;
+            }
+        }
         Ok(())
     }
 

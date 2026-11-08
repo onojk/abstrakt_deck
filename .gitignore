@@ -22,3 +22,8 @@ flatpak/.flatpak-builder/
 flatpak/repo/
 flatpak/build.log
 flatpak/*.log
+
+# Windows packaging: downloaded ffmpeg, build output, signing keys
+packaging/windows/vendor/
+packaging/windows/out/
+*.pfx

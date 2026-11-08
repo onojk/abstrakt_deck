@@ -5,6 +5,7 @@ mod depth_shade;
 mod explosions;
 mod explosion_overlay;
 mod echo_composite;
+mod ffmpeg;
 mod bundles;
 mod cell;
 mod color;
@@ -2060,13 +2061,12 @@ pub fn run_ffmpeg_mux(
     output_path: &std::path::Path,
     fps: u32,
 ) -> MuxResult {
-    use std::process::Command;
     let png_pattern = png_dir.join("frame_%05d.png");
     log::info!(
         "ffmpeg mux: {} + {} → {}",
         png_pattern.display(), audio_path, output_path.display()
     );
-    match Command::new("ffmpeg")
+    match ffmpeg::command()
         .args([
             "-y",
             "-framerate", &fps.to_string(),
@@ -2094,7 +2094,7 @@ pub fn run_ffmpeg_mux(
             MuxResult { success: false, output_path: output_path.to_path_buf(), error_message: Some(stderr) }
         }
         Err(e) => {
-            let msg = format!("ffmpeg subprocess error: {}", e);
+            let msg = format!("ffmpeg subprocess error: {} ({})", e, ffmpeg::install_hint());
             log::error!("{}", msg);
             MuxResult { success: false, output_path: output_path.to_path_buf(), error_message: Some(msg) }
         }
@@ -5803,8 +5803,10 @@ impl GpuState {
             );
         }
 
-        // If recording: copy scene texture to readback buffer in the same encoder submit.
-        if self.recorder.is_some() {
+        // If recording and a frame is due (paced to the recorder's fixed fps):
+        // copy scene texture to readback buffer in the same encoder submit.
+        let capture_frame = self.recorder.as_ref().is_some_and(|r| r.wants_frame());
+        if capture_frame {
             encoder.copy_texture_to_buffer(
                 wgpu::ImageCopyTexture {
                     texture: &self.scene_texture,
@@ -5832,7 +5834,7 @@ impl GpuState {
         self.queue.submit(std::iter::once(encoder.finish()));
 
         // Map readback buffer and feed frame to recorder.
-        if self.recorder.is_some() {
+        if capture_frame && self.recorder.is_some() {
             let frame_bytes = {
                 let buffer_slice = self.readback_buffer.slice(..);
                 let (tx, rx) = std::sync::mpsc::channel();
