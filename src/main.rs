@@ -34,6 +34,7 @@ mod frame_metric;
 mod degenerate_detector;
 mod blocklist;
 mod safety;
+mod flash_guard;
 mod text;
 use audio::{AudioCapture, AudioEvent};
 use help_overlay::HelpOverlay;
@@ -2337,6 +2338,11 @@ struct GpuState {
     /// Time base for rotation/animation; runs at REDUCED_MOTION_SCALE when
     /// reduced_motion is on, identical to wall-clock otherwise.
     motion_clock: safety::MotionClock,
+    /// Reduced Motion flash limiter (final pass, live path only).
+    flash_guard: flash_guard::FlashGuard,
+    /// Reduced Motion: slow-attack/slow-release copies of the five beat
+    /// envelopes (combined, low, mid, high, broadband).
+    beat_smoothed: [f32; 5],
 
     shake_offset: glam::Vec3,
     shake_velocity: glam::Vec3,
@@ -4106,6 +4112,7 @@ impl GpuState {
 
         let bezold            = bezold::Bezold::new(&device, w, h, surface_format);
         let micro_swirl       = micro_swirl::MicroSwirl::new(&device, w, h, surface_format);
+        let flash_guard       = flash_guard::FlashGuard::new(&device, w, h, surface_format);
         let depth_shade       = depth_shade::DepthShade::new(&device, w, h, surface_format);
         let explosion_system  = explosions::ExplosionSystem::new();
         let explosion_overlay = explosion_overlay::ExplosionOverlay::new(&device, w, h, surface_format);
@@ -4218,6 +4225,8 @@ impl GpuState {
             last_frame_time: Instant::now(),
             reduced_motion: false,
             motion_clock: safety::MotionClock::default(),
+            flash_guard,
+            beat_smoothed: [0.0; 5],
             shake_offset: glam::Vec3::ZERO,
             shake_velocity: glam::Vec3::ZERO,
             bass_zoom_smoothed: 0.0,
@@ -4500,6 +4509,7 @@ impl GpuState {
         self.scene_texture = new_scene_tex;
         self.bezold.resize(&self.device, w, h, self.config.format);
         self.micro_swirl.resize(&self.device, w, h, self.config.format);
+        self.flash_guard.resize(&self.device, w, h);
         self.depth_shade.resize(&self.device, w, h, self.config.format);
         self.explosion_overlay.resize(&self.device, w, h, self.config.format);
 
@@ -4765,7 +4775,13 @@ impl GpuState {
             }
         }
 
-        let elapsed = self.start_time.elapsed().as_secs_f32();
+        // Animation time base. Identical to wall-clock seconds unless Reduced
+        // Motion is on, in which case it advances at REDUCED_MOTION_SCALE —
+        // slowing shape rotation, painter scroll and every shader_time-driven
+        // animation (painters, distortion, ribbons, lyrics).
+        let elapsed = self.motion_now();
+        // Reduced Motion: per-frame motion multiplier (1.0 when off).
+        let motion_k = self.motion_clock.scale();
 
         // Rotation-driven painter scroll: shape samples a 0.25-wide window that slides
         // across the 4096-wide painter strip as the shape rotates.
@@ -4796,8 +4812,10 @@ impl GpuState {
                 resolution_x: self.size.width as f32,
                 resolution_y: self.size.height as f32,
                 fold_count: self.params.fold_count,
+                // Reduced Motion: no bass-driven zoom pulse.
                 zoom: self.params.zoom * self.params.current_shape.kaleido_zoom()
-                    + self.bass_zoom_smoothed * self.params.bass_zoom_strength,
+                    + if self.reduced_motion { 0.0 }
+                      else { self.bass_zoom_smoothed * self.params.bass_zoom_strength },
             }]),
         );
 
@@ -4845,6 +4863,9 @@ impl GpuState {
         // Previously hardcoded to 1/60; now frame-rate-accurate.
         let dt = self.last_frame_time.elapsed().as_secs_f32().clamp(0.001, 0.1);
         self.last_frame_time = Instant::now();
+        // dt for animated motion (spin, explosions, 3D orbit cameras): slowed
+        // by Reduced Motion. Physics/UI timing keeps the real dt.
+        let motion_dt = dt * motion_k;
 
         let stiffness = 30.0_f32;
         let damping = 8.0_f32;
@@ -4860,7 +4881,7 @@ impl GpuState {
             } else {
                 0.0
             };
-            self.spin_angle = (self.spin_angle + base_speed * (1.0 + audio_boost) * dt)
+            self.spin_angle = (self.spin_angle + base_speed * (1.0 + audio_boost) * motion_dt)
                 .rem_euclid(std::f32::consts::TAU);
         }
         // Tick explosion system (live path).
@@ -4871,7 +4892,7 @@ impl GpuState {
                 self.params.explosion_interval_max,
             );
             self.explosion_system.tick(
-                dt, &mut rng,
+                motion_dt, &mut rng,
                 self.params.explosion_enabled,
                 self.params.explosion_chunk_count as usize,
                 self.params.explosion_chunk_size,
@@ -4890,7 +4911,8 @@ impl GpuState {
                 trail_decay: effective_trail_decay,
             }]));
 
-        let phase_signal = self.phase_lock_signal();
+        // Reduced Motion: no beat-locked rotation / scale pulse / ribbon jumps.
+        let phase_signal = if self.reduced_motion { None } else { self.phase_lock_signal() };
 
         let shape = self.params.current_shape;
         let base_angle = elapsed
@@ -5061,16 +5083,18 @@ impl GpuState {
             effective_temperature,
         );
         let phase_hue_offset = if self.params.color_phase_cycle_enabled {
-            let (cycle_phase, fade) = if self.params.color_phase_cycle_locked {
+            // Reduced Motion: no beat lock, and the colour cycle runs on the
+            // slowed motion clock.
+            let (cycle_phase, fade) = if self.params.color_phase_cycle_locked && !self.reduced_motion {
                 self.phase_lock_signal().unwrap_or_else(|| {
                     // Fall back to 120 BPM wall clock
                     let cycle_secs = 60.0 / 120.0 * self.params.phase_lock_beats.max(1) as f32;
-                    let t = self.start_time.elapsed().as_secs_f32();
+                    let t = self.motion_now();
                     ((t / cycle_secs).fract(), 1.0)
                 })
             } else {
                 let cycle_secs = 60.0 / 120.0 * self.params.phase_lock_beats.max(1) as f32;
-                let t = self.start_time.elapsed().as_secs_f32();
+                let t = self.motion_now();
                 ((t / cycle_secs).fract(), 1.0)
             };
             cycle_phase * self.params.color_phase_cycle_degrees * fade
@@ -5152,7 +5176,7 @@ impl GpuState {
 
         // Myocyte: lazy grid allocation + per-frame camera rotation + influencer step
         if self.params.current_shape == ShapeKind::Myocyte {
-            self.myocyte_renderer.camera.tick_auto_rotation(dt);
+            self.myocyte_renderer.camera.tick_auto_rotation(motion_dt);
             if self.myocyte_grid.is_none() {
                 let mut grid = cell::CellGrid::new([16, 16, 16], 1.0);
                 grid::place_cells(&mut grid);
@@ -5180,7 +5204,7 @@ impl GpuState {
                     bpm:                  self.shader_bpm,
                     bpm_confidence:       self.shader_bpm_confidence,
                 };
-                self.myocyte_influencer.step_with_audio(grid, &audio, dt);
+                self.myocyte_influencer.step_with_audio(grid, &audio, motion_dt);
             }
             // TEMPORARY debug — remove in phase 5 when rendering proves cells evolve.
             if let Some(grid) = self.myocyte_grid.as_ref() {
@@ -5200,7 +5224,7 @@ impl GpuState {
 
         // PrimeHelix: lazy grid allocation + camera rotation + influencer step
         if self.params.current_shape == ShapeKind::PrimeHelix {
-            self.myocyte_renderer.camera.tick_auto_rotation(dt);
+            self.myocyte_renderer.camera.tick_auto_rotation(motion_dt);
             if self.prime_helix_grid.is_none() {
                 let grid = prime_helix::build_prime_helix_grid();
                 self.prime_helix_grid = Some(grid);
@@ -5222,13 +5246,13 @@ impl GpuState {
                     bpm:                  self.shader_bpm,
                     bpm_confidence:       self.shader_bpm_confidence,
                 };
-                self.prime_helix_influencer.step_with_audio(grid, &audio, dt);
+                self.prime_helix_influencer.step_with_audio(grid, &audio, motion_dt);
             }
         }
 
         // Accents: lazy grid allocation + camera rotation + influencer step
         if self.params.current_shape == ShapeKind::Accents {
-            self.myocyte_renderer.camera.tick_auto_rotation(dt);
+            self.myocyte_renderer.camera.tick_auto_rotation(motion_dt);
             if self.accents_grid.is_none() {
                 let grid = influencer::accents::build_accents_grid();
                 log::info!("[accents] allocated decorative grid: {} splats", grid.cells.len());
@@ -5248,7 +5272,7 @@ impl GpuState {
                     bpm:                  self.shader_bpm,
                     bpm_confidence:       self.shader_bpm_confidence,
                 };
-                self.accents_influencer.step_with_audio(grid, &audio, dt);
+                self.accents_influencer.step_with_audio(grid, &audio, motion_dt);
             }
         }
 
@@ -5525,7 +5549,7 @@ impl GpuState {
                 density:   self.params.micro_swirl_density,
                 amplitude: self.params.micro_swirl_amplitude,
                 speed:     self.params.micro_swirl_speed,
-                time:      self.start_time.elapsed().as_secs_f32(),
+                time:      self.motion_now(),
             });
             let ms_source_owned;
             let ms_source: &wgpu::TextureView = if self.params.bezold_enabled {
@@ -5567,7 +5591,7 @@ impl GpuState {
                 light_z:         self.params.depth_shade_light_z,
                 softness:        self.params.depth_shade_softness,
                 flatness:        self.params.depth_shade_flatness,
-                time:            self.start_time.elapsed().as_secs_f32(),
+                time:            self.motion_now(),
                 swirl_density:   self.params.micro_swirl_density,
                 swirl_amplitude: self.params.micro_swirl_amplitude,
                 swirl_speed:     self.params.micro_swirl_speed,
@@ -5612,6 +5636,15 @@ impl GpuState {
                 &pass5_scene_view_owned
             };
 
+        // Final composite target: the swapchain, or — with Reduced Motion on —
+        // the flash guard's input, which is brightness-limited onto the
+        // swapchain after Pass 5.5 (help overlay and UI are not limited).
+        let composite_target: &wgpu::TextureView = if self.reduced_motion {
+            &self.flash_guard.input_view
+        } else {
+            &screen_view
+        };
+
         // Pass 5: blit scene FBO → swapchain.
         // Priority: blackhole > phantom > plain blit. Blackhole and phantom are mutually exclusive.
         if self.params.blackhole_enabled {
@@ -5631,21 +5664,30 @@ impl GpuState {
             self.blackhole_wander_vel[1] *= 0.95;
             self.blackhole_wander_vel[0] -= (self.blackhole_wander_pos[0] - 0.5) * 0.02;
             self.blackhole_wander_vel[1] -= (self.blackhole_wander_pos[1] - 0.5) * 0.02;
-            self.blackhole_wander_pos[0] += self.blackhole_wander_vel[0];
-            self.blackhole_wander_pos[1] += self.blackhole_wander_vel[1];
-            let wa = self.params.blackhole_wander_amount;
+            // Reduced Motion: vanishing point drifts at 25% speed over 25% of the range.
+            self.blackhole_wander_pos[0] += self.blackhole_wander_vel[0] * motion_k;
+            self.blackhole_wander_pos[1] += self.blackhole_wander_vel[1] * motion_k;
+            let wa = self.params.blackhole_wander_amount * motion_k;
             self.blackhole_wander_pos[0] = self.blackhole_wander_pos[0].clamp(0.5 - wa, 0.5 + wa);
             self.blackhole_wander_pos[1] = self.blackhole_wander_pos[1].clamp(0.5 - wa, 0.5 + wa);
 
             // strength = 0 on first enable → output = live, regardless of uninitialized prev.
             let effective_strength = if just_enabled { 0.0 } else { self.params.blackhole_warp_strength };
+            // Reduced Motion: tunnel zooms at 25% of the per-frame rate and the
+            // feedback gain is cut so the recursion is shallower.
+            let (shrink_rate, effective_strength) = if self.reduced_motion {
+                (1.0 - (1.0 - self.params.blackhole_warp_curve) * motion_k,
+                 effective_strength * 0.75)
+            } else {
+                (self.params.blackhole_warp_curve, effective_strength)
+            };
 
             self.queue.write_buffer(
                 &self.feedback_uniforms_buffer, 0,
                 bytemuck::cast_slice(&[FeedbackUniforms {
                     center_x:     self.blackhole_wander_pos[0],
                     center_y:     self.blackhole_wander_pos[1],
-                    shrink_rate:  self.params.blackhole_warp_curve,
+                    shrink_rate,
                     strength:     effective_strength,
                     alpha_radius: self.params.blackhole_alpha_radius,
                     _pad0: 0.0, _pad1: 0.0, _pad2: 0.0,
@@ -5683,7 +5725,7 @@ impl GpuState {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Feedback blit"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &screen_view, resolve_target: None,
+                        view: composite_target, resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                             store: wgpu::StoreOp::Store,
@@ -5702,7 +5744,7 @@ impl GpuState {
             self.phantom.capture(&mut encoder, &self.device, pass5_source_view);
             self.phantom.composite(
                 &mut encoder, &self.device, &self.queue,
-                pass5_source_view, &screen_view,
+                pass5_source_view, composite_target,
                 self.params.phantom_delay_seconds,
                 self.params.phantom_key_color,
                 self.params.phantom_key_tolerance,
@@ -5730,7 +5772,7 @@ impl GpuState {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Blit pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &screen_view, resolve_target: None,
+                    view: composite_target, resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
@@ -5759,7 +5801,7 @@ impl GpuState {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("Explosion overlay pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view:           &screen_view,
+                            view:           composite_target,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load:  wgpu::LoadOp::Load,
@@ -5773,6 +5815,11 @@ impl GpuState {
                     self.explosion_overlay.render(&mut pass, &scene_bg, n as u32);
                 }
             }
+        }
+
+        // Pass 5.9: Reduced Motion flash limiter → swapchain.
+        if self.reduced_motion {
+            self.flash_guard.run(&self.device, &self.queue, &mut encoder, &screen_view, dt);
         }
 
         // Pass 6: help overlay (animated slide-in, drawn on top of swapchain)
@@ -5898,10 +5945,52 @@ impl GpuState {
         let wall = self.start_time.elapsed().as_secs_f32();
         let scale = if on { safety::REDUCED_MOTION_SCALE } else { 1.0 };
         self.motion_clock.set_scale(wall, scale);
+        if on {
+            // Stop any shake in flight; start the flash limiter from the
+            // current frame's brightness.
+            self.shake_offset = glam::Vec3::ZERO;
+            self.shake_velocity = glam::Vec3::ZERO;
+            self.flash_guard.reset();
+        }
         log::info!("Reduced Motion {}", if on { "enabled" } else { "disabled" });
     }
 
+    /// Current animation time (seconds): wall-clock, or slowed under Reduced Motion.
+    fn motion_now(&self) -> f32 {
+        self.motion_clock.time(self.start_time.elapsed().as_secs_f32())
+    }
+
+    /// Reduced Motion: replace the beat envelopes (which drive brightness
+    /// pulses, ribbon collapse, splat opacity, painter beats) with slower
+    /// attack/release versions. When off, the smoothers just track the raw
+    /// values so switching on doesn't jump.
+    fn smooth_beats_for_reduced_motion(&mut self, dt: f32) {
+        let raw = [
+            self.shader_beat_decay,
+            self.shader_beat_decay_low,
+            self.shader_beat_decay_mid,
+            self.shader_beat_decay_high,
+            self.shader_beat_decay_broadband,
+        ];
+        if !self.reduced_motion {
+            self.beat_smoothed = raw;
+            return;
+        }
+        for (s, r) in self.beat_smoothed.iter_mut().zip(raw) {
+            *s = safety::smooth_envelope(*s, r, dt, 0.25, 0.60);
+        }
+        let [c, l, m, h, b] = self.beat_smoothed;
+        self.shader_beat_decay           = c;
+        self.shader_beat_decay_low       = l;
+        self.shader_beat_decay_mid       = m;
+        self.shader_beat_decay_high      = h;
+        self.shader_beat_decay_broadband = b;
+    }
+
     pub fn kick_shake(&mut self, strength: f32) {
+        // Reduced Motion: no camera shake from beats, file RMS or MIDI notes
+        // on the live display (video exports keep the authored look).
+        if self.reduced_motion && self.export_state.is_none() { return; }
         let elapsed = self.start_time.elapsed().as_secs_f32();
         let angle = (elapsed * 13.7) % std::f32::consts::TAU;
         let dir = glam::Vec3::new(angle.cos(), 0.0, angle.sin());
@@ -6032,8 +6121,11 @@ impl GpuState {
             None => {
                 // Live path: wall-clock Instant (unchanged behavior).
                 let now = Instant::now();
+                // Reduced Motion: at least this long between full-scene
+                // rerolls / painter jumps (normally as little as 0.2–0.5 s).
+                let min_gap: f32 = if self.reduced_motion { 4.0 } else { 0.0 };
                 if self.params.random_mode_enabled {
-                    let interval = 5.0 - 4.8 * self.params.random_mode_aggressiveness;
+                    let interval = (5.0 - 4.8 * self.params.random_mode_aggressiveness).max(min_gap);
                     if now.duration_since(self.last_random_change).as_secs_f32() >= interval {
                         self.randomize_all_params();
                         self.last_random_change = now;
@@ -6042,7 +6134,7 @@ impl GpuState {
                 }
                 if self.params.reactive_mode_enabled {
                     let threshold_mult = lerp(2.5, 1.05, self.params.reactive_mode_aggressiveness);
-                    let cooldown       = lerp(8.0, 0.5,  self.params.reactive_mode_aggressiveness);
+                    let cooldown       = lerp(8.0, 0.5,  self.params.reactive_mode_aggressiveness).max(min_gap);
                     if now.duration_since(self.last_reactive_trigger).as_secs_f32() >= cooldown {
                         let trigger_level = self.bass_mid_baseline * threshold_mult;
                         if self.bass_mid_smoothed > trigger_level && self.bass_mid_baseline > 0.001 {
@@ -6054,7 +6146,7 @@ impl GpuState {
                 }
                 if self.params.party_mode_enabled {
                     let threshold_mult = lerp(2.0, 1.0, self.params.party_mode_aggressiveness);
-                    let cooldown       = lerp(4.0, 0.3, self.params.party_mode_aggressiveness);
+                    let cooldown       = lerp(4.0, 0.3, self.params.party_mode_aggressiveness).max(min_gap);
                     if now.duration_since(self.last_party_trigger).as_secs_f32() >= cooldown {
                         let trigger_level = self.bass_mid_baseline * threshold_mult;
                         if self.bass_mid_smoothed > trigger_level && self.bass_mid_baseline > 0.001 {
@@ -9482,10 +9574,15 @@ impl ApplicationHandler for App {
                 };
 
                 const BANDS_ALPHA: f32 = 0.25;
+                // Reduced Motion: much slower band EMA (~0.25 s vs ~0.06 s at
+                // 60 fps) and slow attack/release on the beat envelopes.
+                const BANDS_ALPHA_REDUCED: f32 = 0.06;
+                let bands_alpha = if gpu.reduced_motion { BANDS_ALPHA_REDUCED } else { BANDS_ALPHA };
                 for (i, &raw) in raw_bands.iter().enumerate() {
                     gpu.bands_smoothed[i] =
-                        gpu.bands_smoothed[i] * (1.0 - BANDS_ALPHA) + raw * BANDS_ALPHA;
+                        gpu.bands_smoothed[i] * (1.0 - bands_alpha) + raw * bands_alpha;
                 }
+                gpu.smooth_beats_for_reduced_motion(frame_dt);
 
                 gpu.update_bass_zoom(raw_bands[0]);
                 gpu.update_modes(raw_bands[0], raw_bands[3], None);
