@@ -33,6 +33,7 @@ mod shape;
 mod frame_metric;
 mod degenerate_detector;
 mod blocklist;
+mod safety;
 mod text;
 use audio::{AudioCapture, AudioEvent};
 use help_overlay::HelpOverlay;
@@ -2331,6 +2332,12 @@ struct GpuState {
     start_time: Instant,
     last_frame_time: Instant,
 
+    /// Reduced Motion (user-safety setting; not part of presets).
+    reduced_motion: bool,
+    /// Time base for rotation/animation; runs at REDUCED_MOTION_SCALE when
+    /// reduced_motion is on, identical to wall-clock otherwise.
+    motion_clock: safety::MotionClock,
+
     shake_offset: glam::Vec3,
     shake_velocity: glam::Vec3,
     bass_zoom_smoothed: f32,
@@ -4209,6 +4216,8 @@ impl GpuState {
             help_overlay,
             start_time: Instant::now(),
             last_frame_time: Instant::now(),
+            reduced_motion: false,
+            motion_clock: safety::MotionClock::default(),
             shake_offset: glam::Vec3::ZERO,
             shake_velocity: glam::Vec3::ZERO,
             bass_zoom_smoothed: 0.0,
@@ -5879,6 +5888,17 @@ impl GpuState {
 
         output.present();
         Ok(())
+    }
+
+    /// Turn Reduced Motion on/off. The motion clock is re-based so the
+    /// rotation/animation phase stays continuous (no jump on toggle).
+    pub fn set_reduced_motion(&mut self, on: bool) {
+        if on == self.reduced_motion { return; }
+        self.reduced_motion = on;
+        let wall = self.start_time.elapsed().as_secs_f32();
+        let scale = if on { safety::REDUCED_MOTION_SCALE } else { 1.0 };
+        self.motion_clock.set_scale(wall, scale);
+        log::info!("Reduced Motion {}", if on { "enabled" } else { "disabled" });
     }
 
     pub fn kick_shake(&mut self, strength: f32) {
@@ -8826,11 +8846,24 @@ struct App {
     prev_audio_source_mode: AudioSourceMode,
     /// Background qbist generation: Some while a render+save is in flight.
     qbist_pending: Option<std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>>,
+    /// App-level settings (safety notice, Reduced Motion) — settings.json.
+    settings: safety::AppSettings,
 }
 
 impl App {
+    /// Apply a Reduced Motion change to the renderer and the menu checkboxes.
+    fn apply_reduced_motion(&mut self, on: bool) {
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.set_reduced_motion(on);
+        }
+        if let Some(menu) = self.menu_bar.as_mut() {
+            menu.reduced_motion = on;
+        }
+    }
+
     fn new() -> Self {
         Self {
+            settings: safety::AppSettings::load(),
             window: None,
             gpu: None,
             fps: FpsCounter::new(),
@@ -8895,6 +8928,19 @@ impl ApplicationHandler for App {
         self.gpu = Some(gpu);
         self.menu_bar = Some(menu_bar);
         log::info!("Window and GPU initialized");
+
+        // User-safety settings: Reduced Motion (explicit choice, else OS
+        // preference) and the one-time photosensitivity / motion notice.
+        let reduced = self.settings.effective_reduced_motion();
+        log::info!(
+            "Reduced Motion: {} ({})",
+            if reduced { "on" } else { "off" },
+            if self.settings.reduced_motion.is_some() { "user setting" } else { "OS default" },
+        );
+        self.apply_reduced_motion(reduced);
+        if let Some(menu) = self.menu_bar.as_mut() {
+            menu.show_safety_notice = !self.settings.safety_notice_acknowledged;
+        }
 
         // Audio capture is started lazily when the user selects Mic or Loopback
         // source mode. Default mode is File, so no capture at startup.
@@ -9689,6 +9735,25 @@ impl ApplicationHandler for App {
                             };
                             gpu.live_lyric_corpus = Some(corpus);
                             log::info!("[lyrics] applied new live corpus");
+                        }
+                        MenuAction::SetReducedMotion(on) => {
+                            gpu.set_reduced_motion(on);
+                            if let Some(menu) = self.menu_bar.as_mut() {
+                                menu.reduced_motion = on;
+                            }
+                            self.settings.reduced_motion = Some(on);
+                            self.settings.save();
+                        }
+                        MenuAction::AcknowledgeSafetyNotice { enable_reduced_motion } => {
+                            self.settings.safety_notice_acknowledged = true;
+                            if enable_reduced_motion {
+                                gpu.set_reduced_motion(true);
+                                if let Some(menu) = self.menu_bar.as_mut() {
+                                    menu.reduced_motion = true;
+                                }
+                                self.settings.reduced_motion = Some(true);
+                            }
+                            self.settings.save();
                         }
                     }
                 }

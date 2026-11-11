@@ -94,6 +94,11 @@ pub enum LockTarget {
     ExplosionFlyoutDur,
 }
 
+const REDUCED_MOTION_HELP: &str =
+    "Slows rotation, zoom and camera movement to 25%, turns off camera shake and \
+     beat-driven zoom and jumps, smooths audio reactions, and limits large \
+     brightness flashes to at most 3 per second.";
+
 #[derive(Debug, Clone)]
 pub struct PlayerInfo {
     pub filename:         String,
@@ -116,6 +121,10 @@ pub enum MenuAction {
     GenerateQbist(f32),
     /// Rebuild the live lyric corpus from this text (empty → DEFAULT_CORPUS).
     ApplyLyrics(String),
+    /// User toggled Reduced Motion (menu, panel, or safety notice). Persisted.
+    SetReducedMotion(bool),
+    /// User dismissed the safety notice. Persisted so it shows only once.
+    AcknowledgeSafetyNotice { enable_reduced_motion: bool },
 }
 
 #[derive(Debug)]
@@ -261,6 +270,10 @@ pub struct MenuBar {
     /// Short note under the audio Source selector (e.g. why Loopback fell
     /// back to Silent). Empty = nothing shown.
     pub audio_status: String,
+    /// Safety notice (photosensitivity / motion sickness) is open.
+    pub show_safety_notice: bool,
+    /// Mirror of the live Reduced Motion state, for the checkboxes.
+    pub reduced_motion: bool,
 }
 
 impl MenuBar {
@@ -298,6 +311,8 @@ impl MenuBar {
                 .unwrap_or_else(|_| crate::text::corpus::DEFAULT_CORPUS.to_string()),
             lyric_status: String::new(),
             audio_status: String::new(),
+            show_safety_notice: false,
+            reduced_motion: false,
         }
     }
 
@@ -404,6 +419,8 @@ impl MenuBar {
         let player_info_snap = self.player_info.clone();
         let audio_status_snap = self.audio_status.clone();
         let export_progress_snap = self.export_progress;
+        let mut show_notice = self.show_safety_notice;
+        let reduced_motion = self.reduced_motion;
         let mut frame_actions: Vec<MenuAction> = Vec::new();
         let mut frame_changes: Vec<ParamChange> = Vec::new();
 
@@ -448,6 +465,11 @@ impl MenuBar {
                             frame_actions.push(MenuAction::ToggleCheatSheet);
                             ui.close_menu();
                         }
+                        ui.separator();
+                        let mut rm = reduced_motion;
+                        if ui.checkbox(&mut rm, "Reduced Motion").changed() {
+                            frame_actions.push(MenuAction::SetReducedMotion(rm));
+                        }
                     });
 
                     ui.menu_button("Tools", |ui| {
@@ -469,6 +491,10 @@ impl MenuBar {
                         ui.separator();
                         if ui.button("Show Cheat Sheet  ?").clicked() {
                             frame_actions.push(MenuAction::ToggleCheatSheet);
+                            ui.close_menu();
+                        }
+                        if ui.button("Safety Notice (Motion & Flashing)...").clicked() {
+                            show_notice = true;
                             ui.close_menu();
                         }
                     });
@@ -494,6 +520,9 @@ impl MenuBar {
                         ui.heading("Visualizer");
                         ui.separator();
                         egui::ScrollArea::vertical().show(ui, |ui| {
+                            Self::comfort_section(ui, reduced_motion,
+                                &mut show_notice, &mut frame_actions);
+                            ui.separator();
                             Self::bundles_section(ui, last_bundle, &mut frame_changes);
                             ui.separator();
                             Self::geometry_section(ui, current_params, &mut frame_changes);
@@ -559,12 +588,17 @@ impl MenuBar {
                         });
                     });
             }
+
+            if show_notice {
+                Self::safety_notice(ctx, reduced_motion, &mut show_notice, &mut frame_actions);
+            }
         });
 
         self.current_crop_y_offset = current_crop;
         self.qbist_detail = current_qbist_detail;
         self.lyric_input_buffer = lyric_buf;
         self.lyric_status = lyric_status;
+        self.show_safety_notice = show_notice;
         self.pending_actions.append(&mut frame_actions);
         self.pending_param_changes.append(&mut frame_changes);
 
@@ -605,6 +639,96 @@ impl MenuBar {
         for id in &full_output.textures_delta.free {
             self.renderer.free_texture(id);
         }
+    }
+
+    /// Comfort & Safety: Reduced Motion toggle at the top of the Visualizer panel.
+    fn comfort_section(
+        ui: &mut egui::Ui,
+        reduced_motion: bool,
+        show_notice: &mut bool,
+        actions: &mut Vec<MenuAction>,
+    ) {
+        ui.collapsing("Comfort & Safety", |ui| {
+            let mut rm = reduced_motion;
+            if ui.checkbox(&mut rm, "Reduced Motion").changed() {
+                actions.push(MenuAction::SetReducedMotion(rm));
+            }
+            ui.label(egui::RichText::new(REDUCED_MOTION_HELP).small().weak());
+            if ui.button("Show safety notice").clicked() {
+                *show_notice = true;
+            }
+        });
+    }
+
+    /// Modal photosensitivity / motion-sickness notice. Blocks the app behind
+    /// it until the user picks an option.
+    fn safety_notice(
+        ctx: &egui::Context,
+        reduced_motion: bool,
+        show_notice: &mut bool,
+        actions: &mut Vec<MenuAction>,
+    ) {
+        // Opaque backdrop: no motion or flashing is visible until the user
+        // has read and dismissed the notice. Also swallows clicks.
+        let screen = ctx.screen_rect();
+        let scrim_id = egui::Id::new("safety_notice_scrim");
+        egui::Area::new(scrim_id)
+            .order(egui::Order::Middle)
+            .fixed_pos(screen.min)
+            .interactable(true)
+            .show(ctx, |ui| {
+                ui.allocate_response(screen.size(), egui::Sense::click_and_drag());
+            });
+        ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, scrim_id))
+            .rect_filled(screen, 0.0, egui::Color32::from_rgb(10, 10, 14));
+
+        egui::Window::new("Safety Notice")
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .default_width(460.0)
+            .show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.heading("Motion and flashing light warning");
+                ui.add_space(6.0);
+                ui.label(
+                    "Abstrakt Deck shows fast motion, rotation, zoom and flashing light. \
+                     These effects may cause discomfort, dizziness or motion sickness, and \
+                     may trigger seizures in people with photosensitive epilepsy.",
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    "If you are sensitive to motion or flashing light, turn on Reduced Motion. \
+                     Stop using the app and look away if you feel unwell.",
+                );
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(
+                    "You can change this at any time: View > Reduced Motion, or \
+                     Visualizer panel > Comfort & Safety. Help > Safety Notice shows \
+                     this message again.").small().weak());
+                if reduced_motion {
+                    ui.add_space(4.0);
+                    ui.colored_label(egui::Color32::from_rgb(120, 220, 140),
+                        "Reduced Motion is currently ON.");
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Continue").clicked() {
+                        actions.push(MenuAction::AcknowledgeSafetyNotice {
+                            enable_reduced_motion: false,
+                        });
+                        *show_notice = false;
+                    }
+                    if ui.button("Turn on Reduced Motion").clicked() {
+                        actions.push(MenuAction::AcknowledgeSafetyNotice {
+                            enable_reduced_motion: true,
+                        });
+                        *show_notice = false;
+                    }
+                });
+            });
     }
 
     fn lock_button(ui: &mut egui::Ui, locked: bool) -> egui::Response {
