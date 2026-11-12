@@ -2321,6 +2321,10 @@ struct GpuState {
     painter_scroll_phase: f32,
 
     pub skin_source: jewel::SkinSource,
+    jewel_pipes: jewel::JewelPipelines,
+    jewel_stream: Option<jewel::JewelStream>,
+    pub jewel_params: jewel::JewelSkinParams,
+    jewel_prev_beat: f32,
     pub skin_source_image: Option<image::DynamicImage>,
     pub crop_y_offset: f32,
     pub loaded_audio: Option<Arc<LoadedAudio>>,
@@ -3371,6 +3375,9 @@ impl GpuState {
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None, cache: None,
             });
+        let jewel_pipes = jewel::JewelPipelines::new(
+            &device, &skin_bgl, &applied_harmony_bgl, PAINTER_FORMAT,
+        );
 
         // ── AudioPaint + PrintHead painter resources ──────────────────────────
         let painter_audio_bgl =
@@ -4197,6 +4204,10 @@ impl GpuState {
             bass_zoom_smoothed: 0.0,
             painter_scroll_phase: 0.0,
             skin_source: jewel::SkinSource::Image,
+            jewel_pipes,
+            jewel_stream: None,
+            jewel_params: jewel::JewelSkinParams::default(),
+            jewel_prev_beat: 0.0,
             skin_source_image: None,
             crop_y_offset: 0.5,
             loaded_audio: None,
@@ -4913,6 +4924,16 @@ impl GpuState {
                 beat_decay:   (painter_beat * beat_r).min(1.0),
                 bands:        self.bands_smoothed,
             }]));
+
+        // Pass 0: jewel skin slice writer (only the new rows of the ring).
+        {
+            let bands = self.bands_smoothed;
+            let beat = self.shader_beat_decay;
+            let phase = phase_signal.map(|(p, _)| p);
+            if self.params.painter_kind == PainterKind::Skin {
+                self.jewel_tick(&mut encoder, dt, bands, beat, phase);
+            }
+        }
 
         // Pass 1: painter → painter FBO
         {
@@ -6653,6 +6674,13 @@ impl GpuState {
                 let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Grid export frame encoder"),
                 });
+                // One shared jewel ring for all Skin panels, stepped once per output frame.
+                if panel_params_snapshot.iter().any(|pp| pp.painter_kind == PainterKind::Skin) {
+                    let (eb, bd) = self.export_state.as_ref()
+                        .map(|e| (e.export_bands_smoothed, e.offline_analyzer.beat_decay))
+                        .unwrap_or(([0.0; 8], 0.0));
+                    self.jewel_tick(&mut enc, 1.0 / fps as f32, eb, bd, None);
+                }
 
                 for (pi, p_params) in panel_params_snapshot.iter().enumerate() {
                     let rect = layout[pi];
@@ -7299,6 +7327,15 @@ impl GpuState {
         let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Export frame encoder"),
         });
+        // Jewel ring steps exactly one output frame (deterministic, not wall time).
+        {
+            let (eb, bd) = self.export_state.as_ref()
+                .map(|e| (e.export_bands_smoothed, e.offline_analyzer.beat_decay))
+                .unwrap_or(([0.0; 8], 0.0));
+            if self.params.painter_kind == PainterKind::Skin {
+                self.jewel_tick(&mut enc, 1.0 / fps as f32, eb, bd, None);
+            }
+        }
 
         // Pass 1: painter (unchanged — 4096×256 is resolution-independent)
         {
@@ -8262,12 +8299,60 @@ impl GpuState {
     /// The Image arm is exactly the pre-jewel binding (pipeline, group 0
     /// = skin texture, group 1 = applied harmony).
     fn bind_skin_painter<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        match self.skin_source {
-            jewel::SkinSource::Image | jewel::SkinSource::Jewel => {
+        match (self.skin_source, self.jewel_stream.as_ref()) {
+            (jewel::SkinSource::Jewel, Some(js)) => {
+                pass.set_pipeline(&self.jewel_pipes.blit_pipeline);
+                pass.set_bind_group(0, &js.sample_bg, &[]);
+                pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
+                pass.set_bind_group(2, &js.blit_bg, &[]);
+            }
+            _ => {
                 pass.set_pipeline(&self.painter_skin_pipeline);
                 pass.set_bind_group(0, &self.skin_bind_group, &[]);
                 pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
             }
+        }
+    }
+
+    /// Switch the Skin painter to the procedural jewel source.
+    pub fn use_jewel_skin(&mut self) {
+        self.skin_source = jewel::SkinSource::Jewel;
+        self.params.painter_kind = PainterKind::Skin;
+        if let Some(js) = self.jewel_stream.as_mut() { js.invalidate(); }
+    }
+
+    /// Advance the jewel ring by `dt` and encode its slice pass, if the
+    /// jewel skin is what the Skin painter will show this frame.
+    /// `bands`/`beat` come from the live smoother or the export analyser.
+    fn jewel_tick(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        dt: f32,
+        bands: [f32; 8],
+        beat: f32,
+        beat_phase: Option<f32>,
+    ) {
+        if self.skin_source != jewel::SkinSource::Jewel { return; }
+        let (pw, ph) = (self.painter_w, self.painter_h);
+        let p = self.jewel_params;
+        if !self.jewel_stream.as_ref().is_some_and(|s| s.matches(pw, ph, &p)) {
+            self.jewel_stream = Some(jewel::JewelStream::new(
+                &self.device, &self.jewel_pipes, &self.skin_bgl, pw, ph, &p,
+            ));
+        }
+        // Big onset = rising beat edge with real bass behind it.
+        let big_onset = beat > 0.9 && self.jewel_prev_beat < 0.5 && bands[0] > 0.6;
+        self.jewel_prev_beat = beat;
+        let audio = jewel::JewelAudio {
+            bass: 0.5 * (bands[0] + bands[1]),
+            mid:  0.5 * (bands[3] + bands[4]),
+            high: (bands[5] + bands[6] + bands[7]) / 3.0,
+            beat,
+            beat_phase,
+            big_onset,
+        };
+        if let Some(js) = self.jewel_stream.as_mut() {
+            js.tick(&self.queue, encoder, &self.jewel_pipes, &p, &audio, dt);
         }
     }
 
@@ -8861,6 +8946,20 @@ impl ApplicationHandler for App {
         let menu_bar = MenuBar::new(&gpu.device, gpu.config.format, &window);
         let (off_w, off_h) = gpu.params.export_resolution.dimensions();
         gpu.offline_target = Some(OfflineTarget::new(&gpu.device, off_w, off_h, gpu.config.format));
+        // ABSTRAKT_JEWEL=<family|1> starts on a jewel skin (testing / perf runs).
+        if let Ok(v) = std::env::var("ABSTRAKT_JEWEL") {
+            if let Some(f) = jewel::JewelFamily::from_name(&v) {
+                gpu.jewel_params.family = f;
+            }
+            if let Some(m) = std::env::var("ABSTRAKT_JEWEL_MOTION").ok()
+                .and_then(|m| jewel::MotionMode::ALL.into_iter()
+                    .find(|x| x.name().eq_ignore_ascii_case(&m)))
+            {
+                gpu.jewel_params.motion = m;
+            }
+            gpu.use_jewel_skin();
+            log::info!("[jewel] ABSTRAKT_JEWEL={v}: starting on {:?}", gpu.jewel_params.family);
+        }
         self.window = Some(window);
         self.gpu = Some(gpu);
         self.menu_bar = Some(menu_bar);
