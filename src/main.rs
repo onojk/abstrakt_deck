@@ -2715,7 +2715,12 @@ impl GpuState {
             format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
+            // ABSTRAKT_NO_VSYNC=1: uncapped present for perf measurements.
+            present_mode: if std::env::var_os("ABSTRAKT_NO_VSYNC").is_some() {
+                wgpu::PresentMode::AutoNoVsync
+            } else {
+                wgpu::PresentMode::AutoVsync
+            },
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -8979,6 +8984,18 @@ impl ApplicationHandler for App {
         let menu_bar = MenuBar::new(&gpu.device, gpu.config.format, &window);
         let (off_w, off_h) = gpu.params.export_resolution.dimensions();
         gpu.offline_target = Some(OfflineTarget::new(&gpu.device, off_w, off_h, gpu.config.format));
+        // ABSTRAKT_SKIN=<image> starts on that image skin (testing / perf runs).
+        if let Some(path) = std::env::var_os("ABSTRAKT_SKIN") {
+            match decode_and_validate_skin(std::path::Path::new(&path)) {
+                Ok(img) => {
+                    let (tw, th) = painter_target_dims(&gpu.params);
+                    gpu.load_skin(crop_skin_image(&img, 0.5, tw, th));
+                    gpu.params.painter_kind = PainterKind::Skin;
+                    gpu.skin_source_image = Some(img);
+                }
+                Err(e) => log::error!("ABSTRAKT_SKIN: {e}"),
+            }
+        }
         // ABSTRAKT_JEWEL=<family|1> starts on a jewel skin (testing / perf runs).
         if let Ok(v) = std::env::var("ABSTRAKT_JEWEL") {
             if let Some(f) = jewel::JewelFamily::from_name(&v) {
