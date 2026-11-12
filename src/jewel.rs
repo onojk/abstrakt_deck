@@ -66,7 +66,7 @@ impl JewelFamily {
         let s = s.to_ascii_lowercase();
         Self::ALL.iter().copied().find(|f| {
             let n = f.name().to_ascii_lowercase();
-            n == s || n.split(' ').next() == Some(s.as_str())
+            n == s || n.split(' ').any(|w| w == s)
         })
     }
 }
@@ -375,7 +375,7 @@ struct Morph {
 pub struct JewelStream {
     pub cross: u32,
     pub len:   u32,
-    _ring_tex: wgpu::Texture,
+    ring_tex: wgpu::Texture,
     ring_view: wgpu::TextureView,
     pub sample_bg: wgpu::BindGroup,
     slice_buf: wgpu::Buffer,
@@ -421,7 +421,9 @@ impl JewelStream {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: RING_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ring_view = ring_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -458,7 +460,7 @@ impl JewelStream {
         log::info!("[jewel] ring {cross}×{len} ({:.1} MiB)", (cross * len * 4) as f32 / 1048576.0);
         Self {
             cross, len,
-            _ring_tex: ring_tex, ring_view, sample_bg,
+            ring_tex, ring_view, sample_bg,
             slice_buf, slice_bg, blit_buf, blit_bg,
             head: 0, row_accum: 0.0, abs_row: 0, filled: false,
             roll_phase: 0.0, slither_phase: 0.0, light_angle: 0.0,
@@ -473,6 +475,45 @@ impl JewelStream {
     pub fn matches(&self, painter_w: u32, painter_h: u32, params: &JewelSkinParams) -> bool {
         self.cross == painter_h.max(16)
             && self.len == params.ring_memory.len_for(painter_w).clamp(256, 16384)
+    }
+
+    /// Debug: read the whole ring back and save it as a PNG, rotated so the
+    /// time axis runs left→right like the painter strip (oldest at the left).
+    /// Blocks on the GPU; never called on the normal render path.
+    pub fn dump_png(&self, device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path) -> Result<(), String> {
+        let bpr = (self.cross * 4).div_ceil(256) * 256;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Jewel dump"),
+            size: (bpr * self.len) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Jewel dump") });
+        enc.copy_texture_to_buffer(
+            self.ring_tex.as_image_copy(),
+            wgpu::ImageCopyBuffer {
+                buffer: &buf,
+                layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(self.len) },
+            },
+            wgpu::Extent3d { width: self.cross, height: self.len, depth_or_array_layers: 1 },
+        );
+        queue.submit(Some(enc.finish()));
+        let slice = buf.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+        let data = slice.get_mapped_range();
+        let mut img = image::RgbaImage::new(self.len, self.cross);
+        for ring_y in 0..self.len {
+            // Column 0 = oldest row (at head).
+            let x = (ring_y + self.len - self.head) % self.len;
+            for c in 0..self.cross {
+                let o = (ring_y * bpr + c * 4) as usize;
+                img.put_pixel(x, c, image::Rgba([data[o], data[o + 1], data[o + 2], 255]));
+            }
+        }
+        drop(data);
+        buf.unmap();
+        img.save(path).map_err(|e| e.to_string())
     }
 
     /// Force a full refill on the next tick (e.g. after a big param change).

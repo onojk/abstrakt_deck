@@ -2325,6 +2325,7 @@ struct GpuState {
     jewel_stream: Option<jewel::JewelStream>,
     pub jewel_params: jewel::JewelSkinParams,
     jewel_prev_beat: f32,
+    jewel_debug_ticks: u32,
     pub skin_source_image: Option<image::DynamicImage>,
     pub crop_y_offset: f32,
     pub loaded_audio: Option<Arc<LoadedAudio>>,
@@ -4208,6 +4209,7 @@ impl GpuState {
             jewel_stream: None,
             jewel_params: jewel::JewelSkinParams::default(),
             jewel_prev_beat: 0.0,
+            jewel_debug_ticks: 0,
             skin_source_image: None,
             crop_y_offset: 0.5,
             loaded_audio: None,
@@ -8353,6 +8355,16 @@ impl GpuState {
         };
         if let Some(js) = self.jewel_stream.as_mut() {
             js.tick(&self.queue, encoder, &self.jewel_pipes, &p, &audio, dt);
+        }
+        // Debug: ABSTRAKT_JEWEL_DUMP=<file.png> saves the ring once, ~4 s in.
+        self.jewel_debug_ticks += 1;
+        if self.jewel_debug_ticks == 240 {
+            if let (Ok(path), Some(js)) = (std::env::var("ABSTRAKT_JEWEL_DUMP"), self.jewel_stream.as_ref()) {
+                match js.dump_png(&self.device, &self.queue, std::path::Path::new(&path)) {
+                    Ok(()) => log::info!("[jewel] ring dumped to {path}"),
+                    Err(e) => log::error!("[jewel] dump failed: {e}"),
+                }
+            }
         }
     }
 
