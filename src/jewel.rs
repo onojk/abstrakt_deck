@@ -155,6 +155,19 @@ pub struct JewelSkinParams {
     /// Master audio-reactivity scalar (0 = static).
     pub audio_amount:    f32,
     pub ring_memory:     RingMemory,
+    // Contrast halos (adaptive underlay): big shapes get an opposite-tone
+    // outline; shapes below `halo_size_min` (pattern units) get none.
+    pub halo_on:         bool,
+    pub halo_size_min:   f32,
+    /// Width as a fraction of shape size, clamped to [w_min, w_max] px.
+    pub halo_k:          f32,
+    pub halo_w_min:      f32,
+    pub halo_w_max:      f32,
+    pub halo_keyline:    bool,
+    /// Edge softness in px.
+    pub halo_soft:       f32,
+    pub halo_light:      [f32; 3],
+    pub halo_dark:       [f32; 3],
 }
 
 impl Default for JewelSkinParams {
@@ -185,6 +198,15 @@ impl Default for JewelSkinParams {
             morph_on_onset: true,
             audio_amount:   1.0,
             ring_memory:    RingMemory::One,
+            halo_on:        true,
+            halo_size_min:  0.3,
+            halo_k:         0.12,
+            halo_w_min:     1.0,
+            halo_w_max:     4.0,
+            halo_keyline:   false,
+            halo_soft:      0.75,
+            halo_light:     [0.97, 0.96, 0.92],
+            halo_dark:      [0.04, 0.03, 0.06],
         }
     }
 }
@@ -238,6 +260,11 @@ struct SliceUniforms {
     roll_phase: f32, roll_dir_flip: f32, spin_rate: f32, churn: f32,
     // v7
     taper: f32, vortex_kick: f32, light_angle: f32, irid_kick: f32,
+    // v8..v11: contrast halos
+    halo_on: f32, halo_size_min: f32, halo_k: f32, halo_w_min: f32,
+    halo_w_max: f32, halo_keyline: f32, halo_soft: f32, halo_kick: f32,
+    halo_light: [f32; 3], _h0: f32,
+    halo_dark: [f32; 3], _h1: f32,
 }
 
 #[repr(C)]
@@ -667,6 +694,19 @@ impl JewelStream {
                 vortex_kick:   self.vortex_kick,
                 light_angle:   self.light_angle.rem_euclid(std::f64::consts::TAU) as f32,
                 irid_kick:     self.irid_kick,
+                halo_on:       if params.halo_on { 1.0 } else { 0.0 },
+                halo_size_min: params.halo_size_min.max(0.0),
+                halo_k:        params.halo_k.max(0.0),
+                halo_w_min:    params.halo_w_min.max(0.0),
+                halo_w_max:    params.halo_w_max.max(params.halo_w_min),
+                halo_keyline:  if params.halo_keyline { 1.0 } else { 0.0 },
+                halo_soft:     params.halo_soft,
+                // Beat → +20% width pulse (decays with the vortex envelope).
+                halo_kick:     self.vortex_kick,
+                halo_light:    params.halo_light,
+                _h0: 0.0,
+                halo_dark:     params.halo_dark,
+                _h1: 0.0,
             };
             queue.write_buffer(&self.slice_buf, 0, bytemuck::bytes_of(&u));
 
@@ -712,7 +752,7 @@ mod tests {
     #[test]
     fn slice_uniforms_are_whole_vec4s() {
         assert_eq!(std::mem::size_of::<SliceUniforms>() % 16, 0);
-        assert_eq!(std::mem::size_of::<SliceUniforms>(), 8 * 16);
+        assert_eq!(std::mem::size_of::<SliceUniforms>(), 12 * 16);
         assert_eq!(std::mem::size_of::<BlitUniforms>(), 16);
     }
 
