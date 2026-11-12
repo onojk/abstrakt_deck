@@ -389,8 +389,67 @@ struct Warped {
     sin_th: f32,
     cos_th: f32,
 };
+// Every term is a function of absolute body-time tb (never ring index), so
+// the warp field is continuous across the ring wrap and the swirl reads as
+// one fluid body carried forward slice by slice.
+
+fn vnoise2(p: vec2<f32>, seed: f32) -> f32 {
+    return 0.65 * vnoise(p, seed) + 0.35 * vnoise(p * 2.07 + 3.1, seed + 9.0);
+}
+// Divergence-free curl of a noise potential: swirls without smearing.
+fn curl(p: vec2<f32>, seed: f32) -> vec2<f32> {
+    let e = 0.08;
+    let dx = vnoise2(p + vec2<f32>(e, 0.0), seed) - vnoise2(p - vec2<f32>(e, 0.0), seed);
+    let dy = vnoise2(p + vec2<f32>(0.0, e), seed) - vnoise2(p - vec2<f32>(0.0, e), seed);
+    return vec2<f32>(dy, -dx) / (2.0 * e);
+}
+
 fn warp_domain(u: f32, tb: f32) -> Warped {
-    return Warped(vec2<f32>(u, tb) * S.scale, 0.0, 1.0);
+    let seed = S.seed_a;
+
+    // 1. SLITHER — lateral spine wiggle (+ a slow fbm drift).
+    var uu = u + S.w_slither * (
+        S.slither_amp * sin(TAU * (tb * S.slither_freq - S.slither_phase))
+      + S.slither_amp * 0.6 * (vnoise2(vec2<f32>(tb * 0.35, 7.0), seed) - 0.5));
+
+    // 2. ROLL — each band is the front face of a turning cylinder:
+    //    θ = asin(2u-1), pattern at θ/π + roll_phase (alternating direction
+    //    per band = counter-rotating gears). asin gives edge foreshortening.
+    let bands = max(S.roll_bands, 1.0);
+    let bi = floor(uu * bands);
+    let ub = uu * bands - bi;
+    let x  = clamp(ub * 2.0 - 1.0, -0.999, 0.999);
+    let th = asin(x);
+    let dir = select(-1.0, 1.0, (i32(bi) & 1) == 0) * S.roll_dir_flip;
+    let u_roll = th / PI + 0.5 + dir * S.roll_phase;
+    let ux = mix(ub, u_roll, S.w_roll);
+    var p = vec2<f32>((bi * 3.17 * S.w_roll + bi + ux) / bands, tb) * S.scale;
+    let sin_th = sin(th) * S.w_roll;
+    let cos_th = sqrt(max(1.0 - sin_th * sin_th, 0.0));
+
+    // 3. CHURN — iterated curl-noise advection + drifting vortices.
+    let kc = S.w_churn * S.churn;
+    if kc > 0.0 {
+        for (var i = 0; i < 2; i = i + 1) {
+            let q = p * 0.35 + vec2<f32>(0.0, tb * 0.15) + f32(i) * 11.3;
+            p = p + kc * 0.55 * curl(q, seed + f32(i) * 31.0);
+        }
+        // Vortices: centres on a 2.5-body-width lattice along t (3 nearest).
+        let P = 2.5;
+        let k0 = floor(tb / P);
+        for (var j = -1; j <= 1; j = j + 1) {
+            let kk = vec2<i32>(i32(k0) + j, 3);
+            let hv = hash2v(kk, seed + 41.0);
+            let c = vec2<f32>(0.2 + 0.6 * hv.x, (k0 + f32(j) + hv.y) * P) * S.scale;
+            let dv = p - c;
+            let sig = 0.35 * S.scale;
+            let strength = kc * (1.6 + 2.0 * S.vortex_kick)
+                         * sin(tb * (0.6 + hv.y) + hv.x * TAU);
+            let ang = strength * exp(-dot(dv, dv) / (sig * sig));
+            p = c + rot2(ang) * dv;
+        }
+    }
+    return Warped(p, sin_th, cos_th);
 }
 
 // ── Fake environment: analytic 3-band sky, no cubemap ──────────────────────
@@ -475,6 +534,8 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                 if mm >= 0.5 { pa = r; }
             }
         }
+        // Fold-over: the surface appears to curl back over itself (kneading).
+        ha = ha + S.w_churn * S.churn * 0.12 * sin(ha * PI * 3.0 + tt * 2.0);
         hs[tap] = ha;
         if tap == 0 { c0 = pa; c0.h = ha; }
     }
@@ -564,6 +625,11 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                   * (1.0 - smoothstep(-soft, soft, d_px));
             col = mix(col, halo_tone(c0.id, pal), a * 0.9);
         }
+    }
+
+    // Roll: contact-shadow groove where neighbouring cylinders meet.
+    if S.w_roll > 0.0 && S.roll_bands > 1.5 {
+        col = col * mix(1.0, smoothstep(0.0, 0.45, W.cos_th), S.w_roll);
     }
 
     // Body taper: envelope across u; outside reads as darker background.
