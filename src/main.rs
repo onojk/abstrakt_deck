@@ -28,6 +28,7 @@ mod frame_metric;
 mod degenerate_detector;
 mod blocklist;
 mod text;
+mod jewel;
 use audio::{AudioCapture, AudioEvent};
 use help_overlay::HelpOverlay;
 use menu_bar::{ExportProgress, MenuAction, MenuBar, ParamChange};
@@ -2319,6 +2320,7 @@ struct GpuState {
     bass_zoom_smoothed: f32,
     painter_scroll_phase: f32,
 
+    pub skin_source: jewel::SkinSource,
     pub skin_source_image: Option<image::DynamicImage>,
     pub crop_y_offset: f32,
     pub loaded_audio: Option<Arc<LoadedAudio>>,
@@ -4194,6 +4196,7 @@ impl GpuState {
             shake_velocity: glam::Vec3::ZERO,
             bass_zoom_smoothed: 0.0,
             painter_scroll_phase: 0.0,
+            skin_source: jewel::SkinSource::Image,
             skin_source_image: None,
             crop_y_offset: 0.5,
             loaded_audio: None,
@@ -4926,9 +4929,7 @@ impl GpuState {
                 occlusion_query_set: None, timestamp_writes: None,
             });
             if self.params.painter_kind == PainterKind::Skin {
-                pass.set_pipeline(&self.painter_skin_pipeline);
-                pass.set_bind_group(0, &self.skin_bind_group, &[]);
-                pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
+                self.bind_skin_painter(&mut pass);
             } else if self.params.painter_kind == PainterKind::AudioPaint {
                 pass.set_pipeline(&self.painter_audio_paint_pipeline);
                 pass.set_bind_group(0, &self.painter_audio_bind_group, &[]);
@@ -6805,9 +6806,7 @@ impl GpuState {
                             occlusion_query_set: None, timestamp_writes: None,
                         });
                         if p_params.painter_kind == PainterKind::Skin {
-                            pass.set_pipeline(&self.painter_skin_pipeline);
-                            pass.set_bind_group(0, &self.skin_bind_group, &[]);
-                            pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
+                            self.bind_skin_painter(&mut pass);
                         } else if p_params.painter_kind == PainterKind::AudioPaint {
                             pass.set_pipeline(&self.painter_audio_paint_pipeline);
                             pass.set_bind_group(0, &self.painter_audio_bind_group, &[]);
@@ -7316,9 +7315,7 @@ impl GpuState {
                 occlusion_query_set: None, timestamp_writes: None,
             });
             if self.params.painter_kind == PainterKind::Skin {
-                pass.set_pipeline(&self.painter_skin_pipeline);
-                pass.set_bind_group(0, &self.skin_bind_group, &[]);
-                pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
+                self.bind_skin_painter(&mut pass);
             } else if self.params.painter_kind == PainterKind::AudioPaint {
                 pass.set_pipeline(&self.painter_audio_paint_pipeline);
                 pass.set_bind_group(0, &self.painter_audio_bind_group, &[]);
@@ -8259,6 +8256,19 @@ impl GpuState {
         self.painter_h = h;
         self.skin_mips = skin_mip_levels(w);
         log::info!("[hd_skin] painter FBO rebuilt to {w}×{h} ({} mip levels)", self.skin_mips);
+    }
+
+    /// Bind the Skin painter for whichever `SkinSource` is active.
+    /// The Image arm is exactly the pre-jewel binding (pipeline, group 0
+    /// = skin texture, group 1 = applied harmony).
+    fn bind_skin_painter<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        match self.skin_source {
+            jewel::SkinSource::Image | jewel::SkinSource::Jewel => {
+                pass.set_pipeline(&self.painter_skin_pipeline);
+                pass.set_bind_group(0, &self.skin_bind_group, &[]);
+                pass.set_bind_group(1, &self.applied_harmony_bind_group, &[]);
+            }
+        }
     }
 
     pub fn load_skin(&mut self, rgba: Vec<u8>) {
