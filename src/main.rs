@@ -4930,7 +4930,8 @@ impl GpuState {
         // Pass 0: jewel skin slice writer (only the new rows of the ring).
         {
             let bands = self.bands_smoothed;
-            let beat = self.shader_beat_decay;
+            // Same beat routing (Combined/Low/Mid/High/…) the painter uses.
+            let beat = self.resolve_route(self.params.audio_route_painter);
             let phase = phase_signal.map(|(p, _)| p);
             if self.params.painter_kind == PainterKind::Skin {
                 self.jewel_tick(&mut encoder, dt, bands, beat, phase);

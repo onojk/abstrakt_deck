@@ -423,6 +423,8 @@ pub struct JewelStream {
     vortex_kick:   f32,
     irid_kick:     f32,
     roll_flip:     f32,
+    /// Seconds until another big onset may morph / flip.
+    onset_cooldown: f32,
 
     /// Seed currently committed (end state of the last morph).
     seed_current: u32,
@@ -491,7 +493,7 @@ impl JewelStream {
             slice_buf, slice_bg, blit_buf, blit_bg,
             head: 0, row_accum: 0.0, abs_row: 0, filled: false,
             roll_phase: 0.0, slither_phase: 0.0, light_angle: 0.0,
-            vortex_kick: 0.0, irid_kick: 0.0, roll_flip: 1.0,
+            vortex_kick: 0.0, irid_kick: 0.0, roll_flip: 1.0, onset_cooldown: 0.0,
             seed_current: params.seed,
             morph: None,
             rng_state: params.seed as u64 ^ 0x9E37_79B9_7F4A_7C15,
@@ -606,7 +608,9 @@ impl JewelStream {
         // Envelopes driven by onsets / beats; decay ≈ ADSR release.
         self.vortex_kick = (self.vortex_kick * (-4.0 * dt as f32).exp()).max(beat);
         self.irid_kick   = (self.irid_kick   * (-3.0 * dt as f32).exp()).max(high * 0.8);
-        if audio.big_onset && amt > 0.0 {
+        self.onset_cooldown = (self.onset_cooldown - dt as f32).max(0.0);
+        if audio.big_onset && amt > 0.0 && self.onset_cooldown <= 0.0 {
+            self.onset_cooldown = 2.0;
             if params.morph_on_onset && self.filled {
                 let len = params.morph_slices.max(1) * params.slice_rows.max(1);
                 self.morph_to_random(len);
