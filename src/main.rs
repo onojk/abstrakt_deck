@@ -769,6 +769,12 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Preset {
+    /// Jewel skin settings + which skin source was active. Older presets
+    /// lack these and load with defaults (image source).
+    #[serde(default)]
+    jewel: jewel::JewelSkinParams,
+    #[serde(default)]
+    skin_source: jewel::SkinSource,
     current_shape: String,
     fold_count: f32,
     zoom: f32,
@@ -1036,6 +1042,8 @@ fn default_color_phase_cycle_locked()  -> bool { true  }
 impl Preset {
     pub fn from_params(params: &VisualParams) -> Self {
         Self {
+            jewel: jewel::JewelSkinParams::default(),
+            skin_source: jewel::SkinSource::Image,
             current_shape: params.current_shape.name().to_string(),
             fold_count: params.fold_count,
             zoom: params.zoom,
@@ -1840,7 +1848,9 @@ fn save_preset(gpu: &GpuState) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
-    let preset = Preset::from_params(&gpu.params);
+    let mut preset = Preset::from_params(&gpu.params);
+    preset.jewel = gpu.jewel_params;
+    preset.skin_source = gpu.skin_source;
     let json = serde_json::to_string_pretty(&preset)
         .map_err(|e| format!("Serialize: {}", e))?;
     std::fs::write(&path, json).map_err(|e| format!("Write: {}", e))?;
@@ -1869,6 +1879,9 @@ fn load_preset(gpu: &mut GpuState) -> Result<(), String> {
     let preset: Preset = serde_json::from_str(&json)
         .map_err(|e| format!("Parse: {}", e))?;
     preset.apply_to_params(&mut gpu.params);
+    gpu.jewel_params = preset.jewel;
+    // The preset's own painter_kind wins; only the skin source is restored.
+    gpu.skin_source = preset.skin_source;
     log::info!("Preset loaded from {}", path.display());
     Ok(())
 }
@@ -4626,6 +4639,13 @@ impl GpuState {
     }
 
     fn render(&mut self, menu: Option<(&mut MenuBar, &winit::window::Window)>) -> Result<(), wgpu::SurfaceError> {
+        let mut menu = menu;
+        // Keep the Jewel Skin panel's mirror in step with GPU state (preset
+        // loads, env var, image-skin loads all change it outside the panel).
+        if let Some((m, _)) = menu.as_mut() {
+            m.jewel_params = self.jewel_params;
+            m.jewel_active = self.skin_source == jewel::SkinSource::Jewel;
+        }
         if self.export_state.is_some() {
             let phase = self.export_state.as_ref().unwrap().phase;
             match phase {
@@ -9621,6 +9641,8 @@ impl ApplicationHandler for App {
                                             menu.current_crop_y_offset = 0.5;
                                         }
                                         gpu.skin_source_image = Some(img);
+                                        gpu.skin_source = jewel::SkinSource::Image;
+                                        if let Some(menu) = self.menu_bar.as_mut() { menu.jewel_active = false; }
                                     }
                                     Err(e) => log::error!("[qbist] decode FAILED: {e}"),
                                 }
@@ -9639,6 +9661,17 @@ impl ApplicationHandler for App {
                             log::info!("Quit via menu");
                             event_loop.exit();
                             return;
+                        }
+                        MenuAction::UseJewelSkin => {
+                            gpu.use_jewel_skin();
+                            if let Some(menu) = self.menu_bar.as_mut() {
+                                menu.jewel_active = true;
+                                menu.jewel_params = gpu.jewel_params;
+                            }
+                        }
+                        MenuAction::UseImageSkin => {
+                            gpu.skin_source = jewel::SkinSource::Image;
+                            if let Some(menu) = self.menu_bar.as_mut() { menu.jewel_active = false; }
                         }
                         MenuAction::OpenSkin => {
                             if let Some(path) = rfd::FileDialog::new()
@@ -9659,6 +9692,8 @@ impl ApplicationHandler for App {
                                             menu.current_crop_y_offset = 0.5;
                                         }
                                         gpu.skin_source_image = Some(img);
+                                        gpu.skin_source = jewel::SkinSource::Image;
+                                        if let Some(menu) = self.menu_bar.as_mut() { menu.jewel_active = false; }
                                         log::info!("Skin loaded — adjust crop in the Skin panel");
                                     }
                                     Err(e) => log::error!("Failed to load skin: {}", e),
@@ -9800,6 +9835,7 @@ impl ApplicationHandler for App {
                         ParamChange::CurrentShape(v)         => gpu.params.current_shape = v,
                         ParamChange::FrameShape(v)           => gpu.params.frame_shape = v,
                         ParamChange::PainterKind(v)          => gpu.params.painter_kind = v,
+                        ParamChange::Jewel(p)                => gpu.jewel_params = p,
                         ParamChange::SkinCropOffset(v) => {
                             gpu.crop_y_offset = v;
                             let (tw, th) = painter_target_dims(&gpu.params);

@@ -23,6 +23,9 @@ struct Slice {
     halo_w_max: f32, halo_keyline: f32, halo_soft: f32, halo_kick: f32,
     halo_light_r: f32, halo_light_g: f32, halo_light_b: f32, _h0: f32,
     halo_dark_r: f32, halo_dark_g: f32, halo_dark_b: f32, _h1: f32,
+    // Shading contrast
+    light: f32, ambient: f32, specular: f32, reflection: f32,
+    ao_amt: f32, shade_contrast: f32, three_d: f32, _s0: f32,
 };
 @group(0) @binding(0) var<uniform> S: Slice;
 
@@ -552,15 +555,17 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let nd_px = c0.nd / ppx;
     let d_px  = c0.d / ppx;
 
-    let k = S.depth * 0.6 / (2.0 * px);      // slope → normal tilt
+    let k = S.depth * S.three_d * 0.6 / (2.0 * px);   // slope → normal tilt (3D macro)
     let nb = normalize(vec3<f32>(-(hx1 - hx0) * k, -(hy1 - hy0) * k, 1.0));
     // Bump normal expressed in the roll cylinder's frame.
     let tangent = vec3<f32>(W.cos_th, 0.0, -W.sin_th);
     let ncyl    = vec3<f32>(W.sin_th, 0.0, W.cos_th);
     var n = normalize(tangent * nb.x + vec3<f32>(0.0, 1.0, 0.0) * nb.y + ncyl * nb.z);
     let lap = (hx1 + hx0 + hy1 + hy0 - 4.0 * c0.h);
-    let ao = clamp(1.0 - max(lap, 0.0) * 18.0 * S.depth, 0.35, 1.0)
-           * mix(0.55, 1.0, smoothstep(0.0, 0.35, c0.h));
+    let ao_k = S.ao_amt * S.three_d;
+    let ao_raw = clamp(1.0 - max(lap, 0.0) * 18.0 * S.depth, 0.35, 1.0)
+               * mix(0.55, 1.0, smoothstep(0.0, 0.35, c0.h));
+    let ao = pow(ao_raw, ao_k);              // 0 = none, 1 = default, 2 = extreme
 
     let v = vec3<f32>(0.0, 0.0, 1.0);
     let base = base_colour(c0.id, c0.h, pal);
@@ -572,12 +577,13 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let l2 = normalize(vec3<f32>(-0.5, -0.6, 0.6));
     // Wrap lighting for candy/gummy (subsurface-ish).
     let wrap = 0.5 * is_candy;
-    let diff = max((dot(n, l1) + wrap) / (1.0 + wrap), 0.0) * 0.85
-             + max((dot(n, l2) + wrap) / (1.0 + wrap), 0.0) * 0.3;
+    let diff = (max((dot(n, l1) + wrap) / (1.0 + wrap), 0.0) * 0.85
+             +  max((dot(n, l2) + wrap) / (1.0 + wrap), 0.0) * 0.3) * S.light;
     let shin = mix(12.0, 160.0, S.gloss);
     let h1 = normalize(l1 + v);
     let h2 = normalize(l2 + v);
-    let spec = pow(max(dot(n, h1), 0.0), shin) + 0.4 * pow(max(dot(n, h2), 0.0), shin);
+    let spec = (pow(max(dot(n, h1), 0.0), shin) + 0.4 * pow(max(dot(n, h2), 0.0), shin))
+             * S.specular * S.three_d;
 
     let r = reflect(-v, n);
     let env = sky(r, pal, tb);
@@ -587,9 +593,15 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let film = palette(ndv * (1.5 + 2.0 * thick) + tb * 0.07 + c0.id, 7);
 
     let is_bg = c0.id < 0.0;
-    var col = base * (0.18 + diff) * ao;
+    // Shade contrast: S-curve on the shading term only, palette untouched.
+    let sc = S.shade_contrast * mix(1.0, S.three_d, 0.5);
+    var shade = clamp(mix(0.5, (S.ambient + diff) * ao, sc), 0.0, 1.6);
+    let s1 = min(shade, 1.0);
+    shade = mix(shade, s1 * s1 * (3.0 - 2.0 * s1) + max(shade - 1.0, 0.0), clamp(sc - 1.0, 0.0, 1.0));
+    var col = base * shade;
     if !is_bg {
-        col = mix(col, env * mix(base, vec3<f32>(1.0), 0.5), 0.25 + 0.45 * S.gloss * (0.4 + 0.6 * fres));
+        col = mix(col, env * mix(base, vec3<f32>(1.0), 0.5),
+                  clamp((0.25 + 0.45 * S.gloss * (0.4 + 0.6 * fres)) * S.reflection, 0.0, 1.0));
         col = col + film * fres * thick * 0.9;
         col = mix(col, col * film * 1.6, thick * 0.25);
         col = col + vec3<f32>(spec) * S.gloss * 0.9;

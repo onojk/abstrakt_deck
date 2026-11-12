@@ -168,6 +168,21 @@ pub struct JewelSkinParams {
     pub halo_soft:       f32,
     pub halo_light:      [f32; 3],
     pub halo_dark:       [f32; 3],
+    // Shading contrast (overall contrast = the app's existing Contrast).
+    /// Key light intensity.
+    pub light:           f32,
+    /// Fill level — low = dramatic, deep shadows.
+    pub ambient:         f32,
+    /// Highlight strength (gloss = exponent).
+    pub specular:        f32,
+    /// Fake env reflection mix.
+    pub reflection:      f32,
+    /// Crevice darkening strength.
+    pub ao:              f32,
+    /// S-curve on the shading term only (palette colours untouched).
+    pub shade_contrast:  f32,
+    /// Macro: scales depth, specular, AO and shade contrast (0 flat, 1, 2 extreme).
+    pub three_d:         f32,
 }
 
 impl Default for JewelSkinParams {
@@ -207,6 +222,13 @@ impl Default for JewelSkinParams {
             halo_soft:      0.75,
             halo_light:     [0.97, 0.96, 0.92],
             halo_dark:      [0.04, 0.03, 0.06],
+            light:          1.0,
+            ambient:        0.18,
+            specular:       1.0,
+            reflection:     1.0,
+            ao:             1.0,
+            shade_contrast: 1.0,
+            three_d:        1.0,
         }
     }
 }
@@ -265,6 +287,9 @@ struct SliceUniforms {
     halo_w_max: f32, halo_keyline: f32, halo_soft: f32, halo_kick: f32,
     halo_light: [f32; 3], _h0: f32,
     halo_dark: [f32; 3], _h1: f32,
+    // v12..v13: shading contrast
+    light: f32, ambient: f32, specular: f32, reflection: f32,
+    ao: f32, shade_contrast: f32, three_d: f32, _s0: f32,
 }
 
 #[repr(C)]
@@ -711,6 +736,14 @@ impl JewelStream {
                 _h0: 0.0,
                 halo_dark:     params.halo_dark,
                 _h1: 0.0,
+                light:          params.light.max(0.0),
+                ambient:        params.ambient.max(0.0),
+                specular:       params.specular.max(0.0),
+                reflection:     params.reflection.max(0.0),
+                ao:             params.ao.max(0.0),
+                shade_contrast: params.shade_contrast.max(0.0),
+                three_d:        params.three_d.clamp(0.0, 2.0),
+                _s0: 0.0,
             };
             queue.write_buffer(&self.slice_buf, 0, bytemuck::bytes_of(&u));
 
@@ -756,7 +789,7 @@ mod tests {
     #[test]
     fn slice_uniforms_are_whole_vec4s() {
         assert_eq!(std::mem::size_of::<SliceUniforms>() % 16, 0);
-        assert_eq!(std::mem::size_of::<SliceUniforms>(), 12 * 16);
+        assert_eq!(std::mem::size_of::<SliceUniforms>(), 14 * 16);
         assert_eq!(std::mem::size_of::<BlitUniforms>(), 16);
     }
 

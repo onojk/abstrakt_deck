@@ -114,12 +114,17 @@ pub enum MenuAction {
     ToggleRecording,
     TogglePanels,
     GenerateQbist(f32),
+    /// Switch the Skin painter to the procedural jewel source.
+    UseJewelSkin,
+    /// Switch the Skin painter back to the loaded image skin.
+    UseImageSkin,
     /// Rebuild the live lyric corpus from this text (empty → DEFAULT_CORPUS).
     ApplyLyrics(String),
 }
 
 #[derive(Debug)]
 pub enum ParamChange {
+    Jewel(crate::jewel::JewelSkinParams),
     FoldCount(f32),
     Zoom(f32),
     RotationSpeedScale(f32),
@@ -252,6 +257,9 @@ pub struct MenuBar {
     skin_thumbnail_aspect: f32,
     pub current_crop_y_offset: f32,
     pub qbist_detail: f32,
+    /// UI mirror of GpuState::jewel_params (main pushes it back on preset load).
+    pub jewel_params: crate::jewel::JewelSkinParams,
+    pub jewel_active: bool,
     pub player_info: Option<PlayerInfo>,
     pub export_progress: Option<ExportProgress>,
     /// Editable lyric text in the Lyrics box — not applied until the user clicks Apply.
@@ -287,6 +295,8 @@ impl MenuBar {
             skin_thumbnail_aspect: 1.0,
             current_crop_y_offset: 0.5,
             qbist_detail: 0.5,
+            jewel_params: crate::jewel::JewelSkinParams::default(),
+            jewel_active: false,
             player_info: None,
             export_progress: None,
             // Seed the box with the same source the live corpus uses at startup,
@@ -394,6 +404,8 @@ impl MenuBar {
         let skin_aspect = self.skin_thumbnail_aspect;
         let mut current_crop = self.current_crop_y_offset;
         let mut current_qbist_detail = self.qbist_detail;
+        let mut jewel_p = self.jewel_params;
+        let jewel_active = self.jewel_active;
         // Lyric box state moved out for the egui closure; written back below.
         let mut lyric_buf    = std::mem::take(&mut self.lyric_input_buffer);
         let mut lyric_status = std::mem::take(&mut self.lyric_status);
@@ -516,6 +528,9 @@ impl MenuBar {
                                 &mut frame_actions,
                             );
                             ui.separator();
+                            Self::jewel_section(ui, &mut jewel_p, jewel_active,
+                                &mut frame_changes, &mut frame_actions);
+                            ui.separator();
                             Self::audio_player_section(
                                 ui,
                                 player_info_snap.as_ref(),
@@ -557,6 +572,7 @@ impl MenuBar {
 
         self.current_crop_y_offset = current_crop;
         self.qbist_detail = current_qbist_detail;
+        self.jewel_params = jewel_p;
         self.lyric_input_buffer = lyric_buf;
         self.lyric_status = lyric_status;
         self.pending_actions.append(&mut frame_actions);
@@ -2725,6 +2741,112 @@ impl MenuBar {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn jewel_section(
+        ui: &mut egui::Ui,
+        p: &mut crate::jewel::JewelSkinParams,
+        active: bool,
+        changes: &mut Vec<ParamChange>,
+        actions: &mut Vec<MenuAction>,
+    ) {
+        use crate::jewel::{JewelFamily, MotionMode, RingMemory, PALETTE_NAMES};
+        ui.collapsing("Jewel Skin", |ui| {
+            let before = *p;
+            ui.horizontal(|ui| {
+                ui.label("Skin source:");
+                if ui.selectable_label(!active, "Image").clicked() && active {
+                    actions.push(MenuAction::UseImageSkin);
+                }
+                if ui.selectable_label(active, "Jewel (procedural)").clicked() && !active {
+                    actions.push(MenuAction::UseJewelSkin);
+                }
+            });
+            egui::ComboBox::from_label("Family")
+                .selected_text(p.family.name())
+                .show_ui(ui, |ui| {
+                    for f in JewelFamily::ALL { ui.selectable_value(&mut p.family, f, f.name()); }
+                });
+            egui::ComboBox::from_label("Palette")
+                .selected_text(PALETTE_NAMES[p.palette as usize % PALETTE_NAMES.len()])
+                .show_ui(ui, |ui| {
+                    for (i, n) in PALETTE_NAMES.iter().enumerate() {
+                        ui.selectable_value(&mut p.palette, i as u32, *n);
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.label(format!("Seed {:04x}", p.seed & 0xFFFF));
+                if ui.button("🎲 Dice").on_hover_text("New seed (morphs in, no cut)").clicked() {
+                    p.seed = rand::random();
+                }
+                if ui.button("Randomize all").clicked() {
+                    p.randomize(&mut rand::thread_rng());
+                }
+            });
+            egui::ComboBox::from_label("Motion")
+                .selected_text(p.motion.name())
+                .show_ui(ui, |ui| {
+                    for m in MotionMode::ALL { ui.selectable_value(&mut p.motion, m, m.name()); }
+                });
+            ui.add(egui::Slider::new(&mut p.scale, 2.0..=14.0).text("Scale (cells across)"));
+            ui.add(egui::Slider::new(&mut p.warp, 0.0..=1.0).text("Warp"));
+            ui.add(egui::Slider::new(&mut p.slices_per_sec, 0.0..=60.0).text("Slices / sec"));
+            ui.add(egui::Slider::new(&mut p.slice_rows, 1..=32).text("Rows / slice"));
+
+            ui.label(egui::RichText::new("Motion").strong());
+            ui.add(egui::Slider::new(&mut p.slither_amp, 0.0..=0.3).text("Slither amp"));
+            ui.add(egui::Slider::new(&mut p.slither_freq, 0.0..=3.0).text("Slither freq"));
+            ui.add(egui::Slider::new(&mut p.roll_speed, -2.0..=2.0).text("Roll speed"));
+            ui.add(egui::Slider::new(&mut p.roll_bands, 1..=4).text("Roll bands"));
+            ui.add(egui::Slider::new(&mut p.spin_rate, 0.0..=3.0).text("Turn (spin)"));
+            ui.add(egui::Slider::new(&mut p.churn, 0.0..=1.5).text("Churn"));
+            ui.add(egui::Slider::new(&mut p.taper, 0.0..=1.0).text("Body taper"));
+            ui.add(egui::Slider::new(&mut p.morph_slices, 4..=512).text("Morph length (slices)"));
+            ui.checkbox(&mut p.morph_on_onset, "Morph on big onset");
+            ui.add(egui::Slider::new(&mut p.audio_amount, 0.0..=2.0).text("Audio amount"));
+
+            ui.label(egui::RichText::new("Shading").strong());
+            ui.add(egui::Slider::new(&mut p.three_d, 0.0..=2.0).text("3D amount (macro)"))
+                .on_hover_text("Scales depth, specular, AO and shade contrast together");
+            ui.add(egui::Slider::new(&mut p.depth, 0.0..=3.0).text("Depth"));
+            ui.add(egui::Slider::new(&mut p.light, 0.0..=2.0).text("Light"));
+            ui.add(egui::Slider::new(&mut p.ambient, 0.0..=1.0).text("Ambient"));
+            ui.add(egui::Slider::new(&mut p.specular, 0.0..=3.0).text("Specular"));
+            ui.add(egui::Slider::new(&mut p.gloss, 0.0..=1.0).text("Gloss"));
+            ui.add(egui::Slider::new(&mut p.reflection, 0.0..=2.0).text("Reflection"));
+            ui.add(egui::Slider::new(&mut p.ao, 0.0..=2.0).text("AO / cavity"));
+            ui.add(egui::Slider::new(&mut p.iridescence, 0.0..=1.5).text("Iridescence"));
+            ui.add(egui::Slider::new(&mut p.glints, 0.0..=2.0).text("Glints"));
+            ui.add(egui::Slider::new(&mut p.shade_contrast, 0.0..=2.0).text("Shade contrast"));
+            ui.label(egui::RichText::new("Overall contrast: Effects → Contrast").small().weak());
+
+            ui.label(egui::RichText::new("Contrast halos").strong());
+            ui.checkbox(&mut p.halo_on, "Halos on");
+            ui.add(egui::Slider::new(&mut p.halo_size_min, 0.0..=1.0).text("Size threshold"));
+            ui.add(egui::Slider::new(&mut p.halo_k, 0.0..=0.5).text("Width (× size)"));
+            ui.add(egui::Slider::new(&mut p.halo_w_min, 0.0..=6.0).text("Min width px"));
+            ui.add(egui::Slider::new(&mut p.halo_w_max, 0.5..=12.0).text("Max width px"));
+            ui.add(egui::Slider::new(&mut p.halo_soft, 0.25..=3.0).text("Softness px"));
+            ui.checkbox(&mut p.halo_keyline, "Inner keyline");
+            ui.horizontal(|ui| {
+                ui.label("Light");
+                ui.color_edit_button_rgb(&mut p.halo_light);
+                ui.label("Dark");
+                ui.color_edit_button_rgb(&mut p.halo_dark);
+            });
+
+            egui::ComboBox::from_label("Ring memory")
+                .selected_text(p.ring_memory.name())
+                .show_ui(ui, |ui| {
+                    for r in RingMemory::ALL { ui.selectable_value(&mut p.ring_memory, r, r.name()); }
+                });
+            if ui.button("Reset to 'Churn' preset").clicked() {
+                *p = crate::jewel::JewelSkinParams::default();
+            }
+            if *p != before {
+                changes.push(ParamChange::Jewel(*p));
+            }
+        });
+    }
+
     fn skin_section_static(
         ui: &mut egui::Ui,
         thumbnail: Option<&egui::TextureHandle>,
